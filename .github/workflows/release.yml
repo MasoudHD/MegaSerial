@@ -14,7 +14,10 @@ permissions:
 jobs:
   build-linux:
     name: Build Linux binary
-    runs-on: ubuntu-latest
+    # Pinned to an older Ubuntu on purpose: PyInstaller binaries require a glibc
+    # at least as new as the build machine's. Building on 22.04 (glibc 2.35)
+    # keeps the binary compatible with Debian 12 and other older distros.
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
 
