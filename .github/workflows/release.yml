@@ -1,0 +1,91 @@
+name: Build & Release
+
+# Publishes standalone Windows and Linux binaries whenever you push a version
+# tag such as v1.0.0. You can also trigger it manually from the Actions tab.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux:
+    name: Build Linux binary
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Build with PyInstaller
+        run: |
+          pyinstaller --noconfirm --clean --onefile \
+            --name MegaSerial \
+            --icon MegaSerial/resources/app_icon.png \
+            --add-data "MegaSerial/resources/app_icon.png:MegaSerial/resources" \
+            --add-data "MegaSerial/resources/about.md:MegaSerial/resources" \
+            --add-data "MegaSerial/resources/app_config.json:MegaSerial/resources" \
+            --hidden-import serial \
+            --collect-submodules MegaSerial \
+            --collect-all pyqtgraph \
+            megaserial_entry.py
+
+      - name: Rename artifact
+        run: mv dist/MegaSerial "dist/MegaSerial-${GITHUB_REF_NAME}-linux-x86_64"
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/MegaSerial-*-linux-x86_64
+          fail_on_unmatched_files: true
+
+  build-windows:
+    name: Build Windows binary
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller pillow
+
+      - name: Generate .ico
+        run: python scripts/make_app_icon_ico.py
+
+      - name: Build with PyInstaller
+        run: >
+          pyinstaller --noconfirm --clean --onefile --windowed
+          --name MegaSerial
+          --icon MegaSerial/resources/app_icon.ico
+          --add-data "MegaSerial/resources/app_icon.png;MegaSerial/resources"
+          --add-data "MegaSerial/resources/about.md;MegaSerial/resources"
+          --add-data "MegaSerial/resources/app_config.json;MegaSerial/resources"
+          --hidden-import serial
+          --collect-submodules MegaSerial
+          --collect-all pyqtgraph
+          megaserial_entry.py
+
+      - name: Rename artifact
+        run: Rename-Item dist/MegaSerial.exe "MegaSerial-${env:GITHUB_REF_NAME}-windows-x86_64.exe"
+        shell: pwsh
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/MegaSerial-*-windows-x86_64.exe
+          fail_on_unmatched_files: true

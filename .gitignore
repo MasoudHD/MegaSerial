@@ -1,0 +1,40 @@
+# Build outputs
+/dist/
+/build/
+*.spec.bak
+
+# Virtual environments
+/.buildvenv
+/.buildvenv-win
+/venv/
+/.venv/
+env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Generated Windows icon (produced by scripts/make_app_icon_ico.py during build)
+/MegaSerial/resources/app_icon.ico
+
+# Local / personal data
+/*.csv
+/*.csv*
+/*.msproj
+serial-log.txt
+*.log
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db

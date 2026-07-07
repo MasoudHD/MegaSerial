@@ -1,0 +1,7 @@
+# SerialTool runtime dependencies.
+# On Debian/Ubuntu these are best installed via apt (already present on this machine):
+#   sudo apt install python3-pyqt6 python3-serial
+# Or via pip (in a virtualenv):
+PyQt6>=6.4
+pyserial>=3.5
+pyqtgraph>=0.13
