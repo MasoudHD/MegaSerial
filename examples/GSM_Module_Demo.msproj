@@ -1,0 +1,493 @@
+{
+  "format_version": 1,
+  "project_name": "GSM Module Demo",
+  "settings": {
+    "theme": "dark",
+    "show_timestamps": true,
+    "show_delays": true,
+    "show_direction": true,
+    "autoscroll": true,
+    "line_mode": true,
+    "send_format": "ASCII",
+    "line_ending": "CRLF (\\r\\n)",
+    "echo_tx": true,
+    "last_port": "",
+    "baudrate": 115200,
+    "bytesize": 8,
+    "parity": "N",
+    "stopbits": 1,
+    "rtscts": false,
+    "xonxoff": false,
+    "auto_reconnect": true,
+    "shortcuts": [
+      {
+        "name": "AT test",
+        "data": "AT",
+        "fmt": "ASCII",
+        "line_ending": "CRLF (\\r\\n)"
+      },
+      {
+        "name": "Echo off",
+        "data": "ATE0",
+        "fmt": "ASCII",
+        "line_ending": "CRLF (\\r\\n)"
+      },
+      {
+        "name": "Signal quality",
+        "data": "AT+CSQ",
+        "fmt": "ASCII",
+        "line_ending": "CRLF (\\r\\n)"
+      },
+      {
+        "name": "Registration",
+        "data": "AT+CREG?",
+        "fmt": "ASCII",
+        "line_ending": "CRLF (\\r\\n)"
+      },
+      {
+        "name": "Operator",
+        "data": "AT+COPS?",
+        "fmt": "ASCII",
+        "line_ending": "CRLF (\\r\\n)"
+      },
+      {
+        "name": "SMS text mode",
+        "data": "AT+CMGF=1",
+        "fmt": "ASCII",
+        "line_ending": "CRLF (\\r\\n)"
+      }
+    ],
+    "history": [
+      {
+        "ts": "2026-07-10T10:00:00",
+        "text": "AT",
+        "fmt": "ASCII",
+        "line_ending": "CRLF (\\r\\n)"
+      },
+      {
+        "ts": "2026-07-10T10:00:01",
+        "text": "AT+CSQ",
+        "fmt": "ASCII",
+        "line_ending": "CRLF (\\r\\n)"
+      }
+    ],
+    "sequence": [
+      {
+        "name": "Ping modem",
+        "data": "AT",
+        "fmt": "ASCII",
+        "line_ending": "CRLF (\\r\\n)",
+        "enabled": true,
+        "advance": "response",
+        "delay_ms": 300,
+        "expect": "OK",
+        "expect_fmt": "ASCII",
+        "timeout_ms": 2000,
+        "on_timeout": "retry",
+        "max_retries": 3,
+        "beep_on_match": true,
+        "fail_on": "ERROR"
+      },
+      {
+        "name": "Echo off",
+        "data": "ATE0",
+        "fmt": "ASCII",
+        "line_ending": "CRLF (\\r\\n)",
+        "enabled": true,
+        "advance": "response",
+        "delay_ms": 200,
+        "expect": "OK",
+        "expect_fmt": "ASCII",
+        "timeout_ms": 2000,
+        "on_timeout": "continue",
+        "max_retries": 2,
+        "beep_on_match": false,
+        "fail_on": ""
+      },
+      {
+        "name": "Signal quality",
+        "data": "AT+CSQ",
+        "fmt": "ASCII",
+        "line_ending": "CRLF (\\r\\n)",
+        "enabled": true,
+        "advance": "both",
+        "delay_ms": 500,
+        "expect": "+CSQ:",
+        "expect_fmt": "ASCII",
+        "timeout_ms": 3000,
+        "on_timeout": "continue",
+        "max_retries": 2,
+        "beep_on_match": false,
+        "fail_on": ""
+      },
+      {
+        "name": "Registration",
+        "data": "AT+CREG?",
+        "fmt": "ASCII",
+        "line_ending": "CRLF (\\r\\n)",
+        "enabled": true,
+        "advance": "response",
+        "delay_ms": 0,
+        "expect": "+CREG:",
+        "expect_fmt": "ASCII",
+        "timeout_ms": 3000,
+        "on_timeout": "continue",
+        "max_retries": 2,
+        "beep_on_match": false,
+        "fail_on": ""
+      }
+    ],
+    "sequence_loop": false,
+    "sequence_loop_delay_ms": 0,
+    "sequence_groups": [
+      {
+        "name": "1. Module initialization",
+        "steps": [
+          {
+            "name": "Ping modem",
+            "data": "AT",
+            "fmt": "ASCII",
+            "line_ending": "CRLF (\\r\\n)",
+            "enabled": true,
+            "advance": "response",
+            "delay_ms": 300,
+            "expect": "OK",
+            "expect_fmt": "ASCII",
+            "timeout_ms": 2000,
+            "on_timeout": "retry",
+            "max_retries": 3,
+            "beep_on_match": true,
+            "fail_on": "ERROR"
+          },
+          {
+            "name": "Disable echo",
+            "data": "ATE0",
+            "fmt": "ASCII",
+            "line_ending": "CRLF (\\r\\n)",
+            "enabled": true,
+            "advance": "response",
+            "delay_ms": 200,
+            "expect": "OK",
+            "expect_fmt": "ASCII",
+            "timeout_ms": 2000,
+            "on_timeout": "continue",
+            "max_retries": 2,
+            "beep_on_match": false,
+            "fail_on": ""
+          },
+          {
+            "name": "Verbose errors",
+            "data": "AT+CMEE=2",
+            "fmt": "ASCII",
+            "line_ending": "CRLF (\\r\\n)",
+            "enabled": true,
+            "advance": "response",
+            "delay_ms": 200,
+            "expect": "OK",
+            "expect_fmt": "ASCII",
+            "timeout_ms": 2000,
+            "on_timeout": "continue",
+            "max_retries": 2,
+            "beep_on_match": false,
+            "fail_on": ""
+          },
+          {
+            "name": "Settle after boot",
+            "data": "",
+            "fmt": "ASCII",
+            "line_ending": "CRLF (\\r\\n)",
+            "enabled": true,
+            "advance": "time",
+            "delay_ms": 1500,
+            "expect": "",
+            "expect_fmt": "ASCII",
+            "timeout_ms": 3000,
+            "on_timeout": "continue",
+            "max_retries": 2,
+            "beep_on_match": false,
+            "fail_on": ""
+          },
+          {
+            "name": "Check SIM ready",
+            "data": "AT+CPIN?",
+            "fmt": "ASCII",
+            "line_ending": "CRLF (\\r\\n)",
+            "enabled": true,
+            "advance": "response",
+            "delay_ms": 500,
+            "expect": "READY",
+            "expect_fmt": "ASCII",
+            "timeout_ms": 5000,
+            "on_timeout": "stop",
+            "max_retries": 2,
+            "beep_on_match": false,
+            "fail_on": "ERROR"
+          }
+        ]
+      },
+      {
+        "name": "2. Signal and network",
+        "steps": [
+          {
+            "name": "Signal quality",
+            "data": "AT+CSQ",
+            "fmt": "ASCII",
+            "line_ending": "CRLF (\\r\\n)",
+            "enabled": true,
+            "advance": "both",
+            "delay_ms": 400,
+            "expect": "+CSQ:",
+            "expect_fmt": "ASCII",
+            "timeout_ms": 3000,
+            "on_timeout": "continue",
+            "max_retries": 2,
+            "beep_on_match": true,
+            "fail_on": ""
+          },
+          {
+            "name": "Network registration",
+            "data": "AT+CREG?",
+            "fmt": "ASCII",
+            "line_ending": "CRLF (\\r\\n)",
+            "enabled": true,
+            "advance": "response",
+            "delay_ms": 0,
+            "expect": "+CREG:",
+            "expect_fmt": "ASCII",
+            "timeout_ms": 3000,
+            "on_timeout": "continue",
+            "max_retries": 2,
+            "beep_on_match": false,
+            "fail_on": ""
+          },
+          {
+            "name": "GPRS attach status",
+            "data": "AT+CGATT?",
+            "fmt": "ASCII",
+            "line_ending": "CRLF (\\r\\n)",
+            "enabled": true,
+            "advance": "response",
+            "delay_ms": 0,
+            "expect": "+CGATT:",
+            "expect_fmt": "ASCII",
+            "timeout_ms": 3000,
+            "on_timeout": "continue",
+            "max_retries": 2,
+            "beep_on_match": false,
+            "fail_on": ""
+          },
+          {
+            "name": "Operator info",
+            "data": "AT+COPS?",
+            "fmt": "ASCII",
+            "line_ending": "CRLF (\\r\\n)",
+            "enabled": true,
+            "advance": "both",
+            "delay_ms": 600,
+            "expect": "+COPS:",
+            "expect_fmt": "ASCII",
+            "timeout_ms": 10000,
+            "on_timeout": "continue",
+            "max_retries": 2,
+            "beep_on_match": false,
+            "fail_on": ""
+          },
+          {
+            "name": "Extended status (HEX)",
+            "data": "41542b435053",
+            "fmt": "HEX",
+            "line_ending": "CRLF (\\r\\n)",
+            "enabled": true,
+            "advance": "time",
+            "delay_ms": 800,
+            "expect": "",
+            "expect_fmt": "ASCII",
+            "timeout_ms": 3000,
+            "on_timeout": "continue",
+            "max_retries": 2,
+            "beep_on_match": false,
+            "fail_on": ""
+          }
+        ]
+      },
+      {
+        "name": "3. SMS configuration",
+        "steps": [
+          {
+            "name": "Text mode SMS",
+            "data": "AT+CMGF=1",
+            "fmt": "ASCII",
+            "line_ending": "CRLF (\\r\\n)",
+            "enabled": true,
+            "advance": "response",
+            "delay_ms": 200,
+            "expect": "OK",
+            "expect_fmt": "ASCII",
+            "timeout_ms": 2000,
+            "on_timeout": "continue",
+            "max_retries": 2,
+            "beep_on_match": false,
+            "fail_on": ""
+          },
+          {
+            "name": "New message indications",
+            "data": "AT+CNMI=2,1,0,0,0",
+            "fmt": "ASCII",
+            "line_ending": "CRLF (\\r\\n)",
+            "enabled": true,
+            "advance": "response",
+            "delay_ms": 200,
+            "expect": "OK",
+            "expect_fmt": "ASCII",
+            "timeout_ms": 2000,
+            "on_timeout": "continue",
+            "max_retries": 2,
+            "beep_on_match": false,
+            "fail_on": ""
+          },
+          {
+            "name": "List unread (demo)",
+            "data": "AT+CMGL=\"REC UNREAD\"",
+            "fmt": "ASCII",
+            "line_ending": "CRLF (\\r\\n)",
+            "enabled": true,
+            "advance": "response",
+            "delay_ms": 0,
+            "expect": "OK",
+            "expect_fmt": "ASCII",
+            "timeout_ms": 5000,
+            "on_timeout": "continue",
+            "max_retries": 2,
+            "beep_on_match": false,
+            "fail_on": ""
+          },
+          {
+            "name": "Send SMS (configure locally)",
+            "data": "AT+CMGS=\"00000000000\"",
+            "fmt": "ASCII",
+            "line_ending": "CRLF (\\r\\n)",
+            "enabled": false,
+            "advance": "time",
+            "delay_ms": 500,
+            "expect": "",
+            "expect_fmt": "ASCII",
+            "timeout_ms": 3000,
+            "on_timeout": "continue",
+            "max_retries": 2,
+            "beep_on_match": false,
+            "fail_on": ""
+          }
+        ]
+      }
+    ],
+    "group_delay_ms": 2000,
+    "group_loop": false,
+    "project_name": "GSM Module Demo",
+    "split_view": true,
+    "view1_format": "ASCII",
+    "view1_bytes_per_row": 16,
+    "view2_format": "HEX",
+    "view2_bytes_per_row": 16,
+    "filter_enabled": false,
+    "filter_pattern": "\\+CSQ|\\+CREG",
+    "filter_direction": "all",
+    "filter_case_insensitive": false,
+    "graph_view": true,
+    "graph_mode": "auto",
+    "graph_max_points": 1000,
+    "graph_rx_only": true,
+    "graph_autoscroll": true
+  },
+  "events": [
+    {
+      "type": "log",
+      "kind": "info",
+      "ts": "2026-07-10T10:00:00",
+      "msg": "Connected to demo port (sample captured log)"
+    },
+    {
+      "type": "data",
+      "dir": "tx",
+      "ts": "2026-07-10T10:00:00.100000",
+      "data": "41540d0a",
+      "data_encoding": "hex"
+    },
+    {
+      "type": "data",
+      "dir": "rx",
+      "ts": "2026-07-10T10:00:00.250000",
+      "data": "4f4b0d0a",
+      "data_encoding": "hex"
+    },
+    {
+      "type": "data",
+      "dir": "tx",
+      "ts": "2026-07-10T10:00:00.500000",
+      "data": "415445300d0a",
+      "data_encoding": "hex"
+    },
+    {
+      "type": "data",
+      "dir": "rx",
+      "ts": "2026-07-10T10:00:00.650000",
+      "data": "4f4b0d0a",
+      "data_encoding": "hex"
+    },
+    {
+      "type": "data",
+      "dir": "tx",
+      "ts": "2026-07-10T10:00:00.900000",
+      "data": "41542b4350494e3f0d0a",
+      "data_encoding": "hex"
+    },
+    {
+      "type": "data",
+      "dir": "rx",
+      "ts": "2026-07-10T10:00:01.100000",
+      "data": "2b4350494e3a2052454144590d0a0d0a4f4b0d0a",
+      "data_encoding": "hex"
+    },
+    {
+      "type": "data",
+      "dir": "tx",
+      "ts": "2026-07-10T10:00:01.400000",
+      "data": "41542b4353510d0a",
+      "data_encoding": "hex"
+    },
+    {
+      "type": "data",
+      "dir": "rx",
+      "ts": "2026-07-10T10:00:01.600000",
+      "data": "2b4353513a2031382c300d0a0d0a4f4b0d0a",
+      "data_encoding": "hex"
+    },
+    {
+      "type": "data",
+      "dir": "rx",
+      "ts": "2026-07-10T10:00:01.900000",
+      "data": "727373693d31382c206265723d300d0a",
+      "data_encoding": "hex"
+    },
+    {
+      "type": "data",
+      "dir": "tx",
+      "ts": "2026-07-10T10:00:02.200000",
+      "data": "41542b435245473f0d0a",
+      "data_encoding": "hex"
+    },
+    {
+      "type": "data",
+      "dir": "rx",
+      "ts": "2026-07-10T10:00:02.400000",
+      "data": "2b435245473a20302c310d0a0d0a4f4b0d0a",
+      "data_encoding": "hex"
+    },
+    {
+      "type": "data",
+      "dir": "rx",
+      "ts": "2026-07-10T10:00:02.700000",
+      "data": "7265673d310d0a",
+      "data_encoding": "hex"
+    }
+  ]
+}
