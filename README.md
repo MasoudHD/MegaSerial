@@ -185,6 +185,15 @@ Numeric values in the incoming stream (e.g. `temp=23.5, hum=40`) are parsed
 automatically and can be plotted as a **time series** or **XY** plot with
 multiple auto-detected series — handy for sensor telemetry.
 
+## MegaSerial introduction on YouTube
+
+<a href="https://www.youtube.com/watch?v=hnMM42_9xCU" target="_blank" rel="noopener noreferrer">
+  <img src="https://img.youtube.com/vi/hnMM42_9xCU/0.jpg" alt="MegaSerial Tutorial: The Ultimate Open-Source Serial Monitor for Embedded">
+</a>
+
+
+
+
 ## Testing without hardware
 
 Create a virtual serial pair and talk to yourself (Linux):
