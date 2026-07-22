@@ -52,6 +52,9 @@ class MainWindow(QMainWindow):
         self.events: deque = deque(maxlen=MAX_EVENTS)
         self._filter_regex = None
         self._building_table = False
+        self._history_nav_index = -1  # -1 = not navigating
+        self._history_nav_pending = ""  # text before navigation started
+        self._history_nav_setting = False  # guard for programmatic text changes
         self.mode = "dark"
         self.colors = theme.COLORS["dark"]
         # RX line-assembly (line mode)
@@ -69,6 +72,50 @@ class MainWindow(QMainWindow):
         self._rebuild_group_table()
         self._rebuild_shortcuts()
         self._rebuild_history()
+
+    # --------------------------------------------------------- history nav
+    def eventFilter(self, obj, event):
+        if obj is self.send_input and event.type() == event.Type.KeyPress:
+            key = event.key()
+            if key == Qt.Key.Key_Up:
+                self._nav_history(1)
+                return True
+            if key == Qt.Key.Key_Down:
+                self._nav_history(-1)
+                return True
+        return super().eventFilter(obj, event)
+
+    def _nav_history(self, direction: int) -> None:
+        if not self.history:
+            return
+        if self._history_nav_index == -1:
+            self._history_nav_pending = self.send_input.text()
+            self._history_nav_index = 0
+        else:
+            self._history_nav_index += direction
+        if self._history_nav_index < 0:
+            self._history_nav_index = -1
+            self._history_nav_setting = True
+            self.send_input.setText(self._history_nav_pending)
+            self._history_nav_setting = False
+            return
+        if self._history_nav_index >= len(self.history):
+            self._history_nav_index = -1
+            self._history_nav_setting = True
+            self.send_input.setText(self._history_nav_pending)
+            self._history_nav_setting = False
+            return
+        entry = self.history[self._history_nav_index]
+        self._history_nav_setting = True
+        self.send_input.setText(entry.get("text", ""))
+        self._history_nav_setting = False
+        self.send_fmt_combo.setCurrentText(utils.normalize_format(entry.get("fmt", "ASCII")))
+        self.line_ending_combo.setCurrentText(entry.get("line_ending", "CRLF (\\r\\n)"))
+
+    def _on_send_input_changed(self, _text: str) -> None:
+        if not self._history_nav_setting:
+            self._history_nav_index = -1
+            self._history_nav_pending = ""
 
     # ------------------------------------------------------------------ UI
     def _build_ui(self) -> None:
@@ -163,7 +210,7 @@ class MainWindow(QMainWindow):
         self.port_combo = QComboBox()
         self.port_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.refresh_btn = QPushButton("⟳")
-        self.refresh_btn.setFixedWidth(36)
+        self.refresh_btn.setFixedWidth(42)
         self.refresh_btn.setToolTip("Refresh port list")
         self.refresh_btn.clicked.connect(self.refresh_ports)
         port_row.addWidget(self.port_combo, 1)
@@ -311,9 +358,14 @@ class MainWindow(QMainWindow):
         send_box = QGroupBox("Send")
         sv = QVBoxLayout(send_box)
         row = QHBoxLayout()
+        self.clear_after_send_check = QCheckBox("Clear after send")
+        self.clear_after_send_check.setToolTip("Clear the input field after sending data")
+        row.addWidget(self.clear_after_send_check)
         self.send_input = QLineEdit()
         self.send_input.setPlaceholderText("Type data and press Enter to send…")
         self.send_input.returnPressed.connect(self.send_current)
+        self.send_input.installEventFilter(self)
+        self.send_input.textChanged.connect(self._on_send_input_changed)
         row.addWidget(self.send_input, 1)
         self.send_fmt_combo = QComboBox()
         self.send_fmt_combo.addItems(utils.FORMATS)
@@ -542,6 +594,7 @@ class MainWindow(QMainWindow):
         self.group_delay.setValue(c.get("group_delay_ms", 0))
         self.group_loop_check.setChecked(c.get("group_loop", False))
         self.project_name_edit.setText(c.get("project_name", ""))
+        self.clear_after_send_check.setChecked(c.get("clear_after_send", False))
         self.split_check.setChecked(c.get("split_view", False))
         self._on_split_toggled(self.split_check.isChecked())
         self.filter_check.setChecked(c.get("filter_enabled", False))
@@ -583,6 +636,7 @@ class MainWindow(QMainWindow):
             "group_delay_ms": self.group_delay.value(),
             "group_loop": self.group_loop_check.isChecked(),
             "project_name": self.project_name_edit.text().strip(),
+            "clear_after_send": self.clear_after_send_check.isChecked(),
             "split_view": self.split_check.isChecked(),
             "view1_format": self.view1.fmt,
             "view1_bytes_per_row": self.view1.bytes_per_row,
@@ -889,6 +943,10 @@ class MainWindow(QMainWindow):
         payload += utils.LINE_ENDINGS.get(line_ending, b"")
         if self._write_bytes(payload):
             self._record_history(text, fmt, line_ending)
+            self._history_nav_index = -1
+            self._history_nav_pending = ""
+            if self.clear_after_send_check.isChecked():
+                self.send_input.clear()
 
     # -------------------------------------------------------------- shortcuts
     def _rebuild_shortcuts(self) -> None:
