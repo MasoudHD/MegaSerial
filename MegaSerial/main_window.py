@@ -287,8 +287,11 @@ class MainWindow(QMainWindow):
         self.linemode_check = QCheckBox("Line mode")
         self.linemode_check.setToolTip(
             "Assemble incoming bytes into one entry per line (best for text/AT data)")
+        self.linenum_check = QCheckBox("Line numbers")
+        self.linenum_check.setToolTip("Show line numbers in the log view")
+        self.linenum_check.toggled.connect(self._rerender_all)
         self.split_check = QCheckBox("Split view")
-        for chk in (self.ts_check, self.delay_check, self.dir_check, self.autoscroll_check):
+        for chk in (self.ts_check, self.delay_check, self.dir_check, self.autoscroll_check, self.linenum_check):
             chk.toggled.connect(self._rerender_all)
             tb.addWidget(chk)
         self.linemode_check.toggled.connect(self._on_linemode_toggled)
@@ -586,6 +589,7 @@ class MainWindow(QMainWindow):
         self.delay_check.setChecked(c.get("show_delays", False))
         self.dir_check.setChecked(c.get("show_direction", True))
         self.autoscroll_check.setChecked(c.get("autoscroll", True))
+        self.linenum_check.setChecked(c.get("show_line_numbers", False))
         self.linemode_check.setChecked(c.get("line_mode", True))
         self.send_fmt_combo.setCurrentText(c.get("send_format", "ASCII"))
         self.line_ending_combo.setCurrentText(c.get("line_ending", "CRLF (\\r\\n)"))
@@ -616,6 +620,7 @@ class MainWindow(QMainWindow):
             "show_delays": self.delay_check.isChecked(),
             "show_direction": self.dir_check.isChecked(),
             "autoscroll": self.autoscroll_check.isChecked(),
+            "show_line_numbers": self.linenum_check.isChecked(),
             "line_mode": self.linemode_check.isChecked(),
             "send_format": self.send_fmt_combo.currentText(),
             "line_ending": self.line_ending_combo.currentText(),
@@ -781,6 +786,7 @@ class MainWindow(QMainWindow):
             "show_ts": self.ts_check.isChecked(),
             "show_delays": self.delay_check.isChecked(),
             "show_dir": self.dir_check.isChecked(),
+            "show_linenum": self.linenum_check.isChecked(),
             "autoscroll": self.autoscroll_check.isChecked(),
             "colors": self.colors,
         }

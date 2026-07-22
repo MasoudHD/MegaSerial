@@ -56,10 +56,12 @@ def event_matches_filter(ev: dict, regex: re.Pattern | None,
 
 
 def render_html(ev: dict, fmt: str, bytes_per_row: int, opts: dict,
-                prev_ts: datetime | None = None) -> str:
+                prev_ts: datetime | None = None, line_num: int = 0) -> str:
     """Build one HTML block for an event, given a view's format/row settings."""
     colors = opts["colors"]
     prefix = ""
+    if opts.get("show_linenum") and line_num > 0:
+        prefix += f'<span style="color:{colors["timestamp"]}">{line_num:>5} </span>'
     if opts.get("show_delays") and prev_ts is not None and "ts" in ev:
         delta_ms = int((ev["ts"] - prev_ts).total_seconds() * 1000)
         if delta_ms >= 0:
@@ -93,6 +95,7 @@ class MonitorView(QWidget):
                  on_settings_changed=None, max_blocks: int = 6000):
         super().__init__()
         self._on_change = on_settings_changed
+        self._line_counter = 0
 
         v = QVBoxLayout(self)
         v.setContentsMargins(0, 0, 0, 0)
@@ -152,18 +155,21 @@ class MonitorView(QWidget):
 
     # -- rendering ---------------------------------------------------------
     def append_event(self, ev: dict, opts: dict, prev_ts: datetime | None = None) -> None:
-        self.edit.appendHtml(render_html(ev, self.fmt, self.bytes_per_row, opts, prev_ts))
+        self._line_counter += 1
+        self.edit.appendHtml(render_html(ev, self.fmt, self.bytes_per_row, opts, prev_ts, self._line_counter))
         if opts.get("autoscroll"):
             sb = self.edit.verticalScrollBar()
             sb.setValue(sb.maximum())
 
     def rerender(self, events, opts: dict) -> None:
         self.edit.clear()
+        self._line_counter = 0
         fmt = self.fmt
         bpr = self.bytes_per_row
         prev_ts = None
         for ev in events:
-            self.edit.appendHtml(render_html(ev, fmt, bpr, opts, prev_ts))
+            self._line_counter += 1
+            self.edit.appendHtml(render_html(ev, fmt, bpr, opts, prev_ts, self._line_counter))
             if "ts" in ev:
                 prev_ts = ev["ts"]
         if opts.get("autoscroll"):
@@ -172,6 +178,7 @@ class MonitorView(QWidget):
 
     def clear(self) -> None:
         self.edit.clear()
+        self._line_counter = 0
 
     def plain_text(self) -> str:
         return self.edit.toPlainText()
