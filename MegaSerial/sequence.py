@@ -57,7 +57,7 @@ class Step:
     fail_on: str = ""          # if this reply is seen first, the step fails fast
 
     def payload_bytes(self) -> bytes:
-        return utils.parse_input(self.data, self.fmt) + utils.LINE_ENDINGS.get(self.line_ending, b"")
+        return utils.build_payload(self.data, self.fmt, self.line_ending)
 
     def expect_bytes(self) -> bytes:
         if not self.expect:

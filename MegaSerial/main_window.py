@@ -942,11 +942,10 @@ class MainWindow(QMainWindow):
         fmt = self.send_fmt_combo.currentText()
         line_ending = self.line_ending_combo.currentText()
         try:
-            payload = utils.parse_input(text, fmt)
+            payload = utils.build_payload(text, fmt, line_ending)
         except utils.ParseError as exc:
             QMessageBox.warning(self, "Invalid data", str(exc))
             return
-        payload += utils.LINE_ENDINGS.get(line_ending, b"")
         if self._write_bytes(payload):
             self._record_history(text, fmt, line_ending)
             self._history_nav_index = -1
@@ -972,13 +971,13 @@ class MainWindow(QMainWindow):
         if row < 0 or row >= len(self.shortcuts):
             return
         sc = self.shortcuts[row]
+        line_ending = sc.get("line_ending", "None")
         try:
-            payload = utils.parse_input(sc.get("data", ""), sc.get("fmt", "ASCII"))
+            payload = utils.build_payload(
+                sc.get("data", ""), sc.get("fmt", "ASCII"), line_ending)
         except utils.ParseError as exc:
             QMessageBox.warning(self, "Invalid shortcut", str(exc))
             return
-        line_ending = sc.get("line_ending", "None")
-        payload += utils.LINE_ENDINGS.get(line_ending, b"")
         if self._write_bytes(payload):
             self._record_history(sc.get("data", ""), sc.get("fmt", "ASCII"), line_ending)
 
@@ -1049,11 +1048,10 @@ class MainWindow(QMainWindow):
         h = self.history[row]
         fmt = utils.normalize_format(h.get("fmt", "ASCII"))
         try:
-            payload = utils.parse_input(h.get("text", ""), fmt)
+            payload = utils.build_payload(h.get("text", ""), fmt, h.get("line_ending", "None"))
         except utils.ParseError as exc:
             QMessageBox.warning(self, "Invalid data", str(exc))
             return
-        payload += utils.LINE_ENDINGS.get(h.get("line_ending", "None"), b"")
         self._write_bytes(payload)
 
     def save_history_as_shortcut(self) -> None:

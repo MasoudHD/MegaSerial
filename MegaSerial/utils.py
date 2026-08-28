@@ -123,6 +123,11 @@ def parse_input(text: str, fmt: str) -> bytes:
     raise ParseError(f"Unknown format: {fmt}")
 
 
+def build_payload(text: str, fmt: str, line_ending: str | None) -> bytes:
+    """Parse a send payload and append the selected line ending."""
+    return parse_input(text, fmt) + LINE_ENDINGS.get(line_ending, b"")
+
+
 # ---------------------------------------------------------------------------
 # bytes -> text (for the monitor view)
 # ---------------------------------------------------------------------------
