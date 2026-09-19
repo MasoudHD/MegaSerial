@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import (
 )
 
 from . import utils
+from .panel_protocol import panel_event
 
 DISPLAY_FORMATS = ["ASCII", "HEX", "Binary", "Hexdump"]
 BYTES_PER_ROW = ["8", "16", "32", "64"]
@@ -137,20 +138,25 @@ def event_csv_row(ev: dict, index: int, prev_ts: datetime | None) -> list:
     return [row.get(column, "") for column in CSV_COLUMNS]
 
 
-def events_to_csv_rows(events) -> list[list]:
+def events_to_csv_rows(events, panel_titles: dict | None = None) -> list[list]:
     """Return the header row followed by one row per event."""
-    rows = [list(CSV_COLUMNS)]
+    rows = [list(CSV_COLUMNS) + (["panel_id", "panel_title"] if panel_titles is not None else [])]
     prev_ts = None
     for index, ev in enumerate(events, start=1):
-        rows.append(event_csv_row(ev, index, prev_ts))
+        row = event_csv_row(ev, index, prev_ts)
+        if panel_titles is not None:
+            ident = ev.get("panel_id") or "general"
+            row[CSV_COLUMNS.index("text")] = _csv_text(panel_event(ev))
+            row.extend([ident, panel_titles.get(ident, "General" if ident == "general" else "")])
+        rows.append(row)
         if isinstance(ev.get("ts"), datetime):
             prev_ts = ev["ts"]
     return rows
 
 
-def write_events_csv(path: str | Path, events) -> int:
+def write_events_csv(path: str | Path, events, panel_titles: dict | None = None) -> int:
     """Write *events* as CSV and return the number of exported events."""
-    rows = events_to_csv_rows(events)
+    rows = events_to_csv_rows(events, panel_titles)
     with open(path, "w", encoding=CSV_ENCODING, newline="") as fh:
         csv.writer(fh).writerows(rows)
     return len(rows) - 1
