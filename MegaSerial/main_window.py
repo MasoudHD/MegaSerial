@@ -38,6 +38,13 @@ BAUD_RATES = ["300", "1200", "2400", "4800", "9600", "19200", "38400",
 MAX_EVENTS = 6000
 MAX_HISTORY = 200
 
+# Column layout of the Sequence Group table.
+GROUP_COL_ON = 0
+GROUP_COL_NAME = 1
+GROUP_COL_STEPS = 2
+GROUP_COL_SEND = 3
+GROUP_COL_STATUS = 4
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -57,6 +64,7 @@ class MainWindow(QMainWindow):
         self.events: deque = deque(maxlen=MAX_EVENTS)
         self._filter_regex = None
         self._building_table = False
+        self._building_group_table = False
         self._history_nav_index = -1  # -1 = not navigating
         self._history_nav_pending = ""  # text before navigation started
         self._history_nav_setting = False  # guard for programmatic text changes
@@ -545,16 +553,17 @@ class MainWindow(QMainWindow):
         hint.setStyleSheet("color: palette(mid);")
         v.addWidget(hint)
 
-        self.group_table = QTableWidget(0, 4)
-        self.group_table.setHorizontalHeaderLabels(["Name", "Steps", "Send", "Status"])
+        self.group_table = QTableWidget(0, 5)
+        self.group_table.setHorizontalHeaderLabels(["On", "Name", "Steps", "Send", "Status"])
         self.group_table.verticalHeader().setVisible(False)
         self.group_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.group_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.group_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.group_table.doubleClicked.connect(lambda _: self.edit_group_sequence())
+        self.group_table.itemChanged.connect(self._on_group_item_changed)
         gh = self.group_table.horizontalHeader()
-        gh.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        for c in (1, 2, 3):
+        gh.setSectionResizeMode(GROUP_COL_NAME, QHeaderView.ResizeMode.Stretch)
+        for c in (GROUP_COL_ON, GROUP_COL_STEPS, GROUP_COL_SEND, GROUP_COL_STATUS):
             gh.setSectionResizeMode(c, QHeaderView.ResizeMode.ResizeToContents)
         v.addWidget(self.group_table, 1)
 
@@ -1324,20 +1333,35 @@ class MainWindow(QMainWindow):
 
     # -------------------------------------------------------- sequence group
     def _rebuild_group_table(self) -> None:
+        self._building_group_table = True
         self.group_table.setRowCount(len(self.sequence_groups))
         for r, seq in enumerate(self.sequence_groups):
             enabled = sum(1 for s in seq.steps if s.enabled)
             total = len(seq.steps)
-            self.group_table.setItem(r, 0, QTableWidgetItem(seq.name))
-            self.group_table.setItem(r, 1, QTableWidgetItem(f"{enabled}/{total}"))
+            on = QTableWidgetItem()
+            on.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled)
+            on.setCheckState(Qt.CheckState.Checked if seq.enabled else Qt.CheckState.Unchecked)
+            on.setToolTip("Include this sequence when the whole group runs")
+            self.group_table.setItem(r, GROUP_COL_ON, on)
+            self.group_table.setItem(r, GROUP_COL_NAME, QTableWidgetItem(seq.name))
+            self.group_table.setItem(r, GROUP_COL_STEPS, QTableWidgetItem(f"{enabled}/{total}"))
             send_btn = QPushButton("Send")
             send_btn.clicked.connect(lambda _checked, row=r: self.send_group_sequence(row))
-            self.group_table.setCellWidget(r, 2, send_btn)
-            self.group_table.setItem(r, 3, QTableWidgetItem(""))
+            self.group_table.setCellWidget(r, GROUP_COL_SEND, send_btn)
+            self.group_table.setItem(r, GROUP_COL_STATUS, QTableWidgetItem(""))
+        self._building_group_table = False
+
+    def _on_group_item_changed(self, item: QTableWidgetItem) -> None:
+        if self._building_group_table or item.column() != GROUP_COL_ON:
+            return
+        row = item.row()
+        if 0 <= row < len(self.sequence_groups):
+            # Only the group membership changes; the sequence's steps are untouched.
+            self.sequence_groups[row].enabled = item.checkState() == Qt.CheckState.Checked
 
     def _set_group_table_enabled(self, enabled: bool) -> None:
         for r in range(self.group_table.rowCount()):
-            w = self.group_table.cellWidget(r, 2)
+            w = self.group_table.cellWidget(r, GROUP_COL_SEND)
             if w:
                 w.setEnabled(enabled)
 
@@ -1346,7 +1370,7 @@ class MainWindow(QMainWindow):
 
     def _clear_group_status(self) -> None:
         for r in range(self.group_table.rowCount()):
-            item = self.group_table.item(r, 3)
+            item = self.group_table.item(r, GROUP_COL_STATUS)
             if item:
                 item.setText("")
 
@@ -1423,8 +1447,8 @@ class MainWindow(QMainWindow):
             return
         self.stop_sequence()
         self._clear_group_status()
-        if self.group_table.item(row, 3):
-            self.group_table.item(row, 3).setText("running…")
+        if self.group_table.item(row, GROUP_COL_STATUS):
+            self.group_table.item(row, GROUP_COL_STATUS).setText("running…")
         self.group_table.selectRow(row)
         self.runner = SequenceRunner(seq.steps, self.worker.write, self.rx_monitor)
         self.runner.step_started.connect(
@@ -1445,7 +1469,7 @@ class MainWindow(QMainWindow):
 
     def _set_group_row_status(self, row: int, status: str) -> None:
         if 0 <= row < self.group_table.rowCount():
-            item = self.group_table.item(row, 3)
+            item = self.group_table.item(row, GROUP_COL_STATUS)
             if item:
                 item.setText(status)
 
@@ -1464,8 +1488,10 @@ class MainWindow(QMainWindow):
         if not self.sequence_groups:
             QMessageBox.information(self, "Empty group", "Add at least one sequence.")
             return
-        if not any(any(s.enabled for s in seq.steps) for seq in self.sequence_groups):
-            QMessageBox.information(self, "Empty group", "No enabled steps in any sequence.")
+        if not any(any(s.enabled for s in seq.steps)
+                   for seq in self.sequence_groups if seq.enabled):
+            QMessageBox.information(
+                self, "Empty group", "No enabled steps in any enabled sequence.")
             return
         self.stop_sequence()
         self._clear_group_status()
@@ -1486,8 +1512,8 @@ class MainWindow(QMainWindow):
     def _on_group_seq_started(self, idx: int, _name: str) -> None:
         if 0 <= idx < self.group_table.rowCount():
             self.group_table.selectRow(idx)
-            if self.group_table.item(idx, 3):
-                self.group_table.item(idx, 3).setText("running…")
+            if self.group_table.item(idx, GROUP_COL_STATUS):
+                self.group_table.item(idx, GROUP_COL_STATUS).setText("running…")
 
     def _on_group_seq_finished(self, idx: int, _name: str, completed: bool) -> None:
         if 0 <= idx < self.group_table.rowCount():

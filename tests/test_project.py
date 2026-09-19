@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from MegaSerial import project, utils
-from MegaSerial.sequence import Step
+from MegaSerial.sequence import NamedSequence, Step
 
 
 TS = datetime(2024, 1, 2, 3, 4, 5, 123456)
@@ -133,6 +133,38 @@ class ProjectSerializationTests(unittest.TestCase):
         self.assertEqual(restored["line_ending_custom_suffix"], r"\x1a")
         self.assertEqual(restored["shortcuts"][0]["custom_suffix"], r"\x1a")
         self.assertEqual(Step.from_dict(restored["sequence"][0]).payload_bytes(), b"AT\x1a")
+
+    def test_sequence_group_enabled_flags_round_trip_through_a_project_file(self):
+        groups = [
+            NamedSequence(name="first", steps=[Step(name="A")], enabled=True),
+            NamedSequence(name="second", steps=[Step(name="B")], enabled=False),
+            NamedSequence(name="third", steps=[Step(name="C")], enabled=True),
+        ]
+        data = project.collect_project_data(
+            project_name="Group",
+            settings={"sequence_groups": [g.to_dict() for g in groups]},
+            events=[],
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "project.msproj"
+            project.save_project(path, data)
+            loaded = project.load_project(path)
+
+        restored = [NamedSequence.from_dict(d)
+                    for d in loaded["settings"]["sequence_groups"]]
+        self.assertEqual([g.name for g in restored], ["first", "second", "third"])
+        self.assertEqual([g.enabled for g in restored], [True, False, True])
+        self.assertTrue(all(s.enabled for g in restored for s in g.steps))
+
+    def test_project_groups_without_enabled_flags_load_as_enabled(self):
+        loaded = self._load_raw({
+            "format_version": 1,
+            "settings": {"sequence_groups": [{"name": "Legacy", "steps": []}]},
+        })
+
+        restored = NamedSequence.from_dict(loaded["settings"]["sequence_groups"][0])
+        self.assertTrue(restored.enabled)
 
     def test_invalid_hex_event_data_raises_value_error(self):
         with self.assertRaises(ValueError):

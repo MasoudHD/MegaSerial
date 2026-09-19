@@ -59,6 +59,9 @@ plot live numeric data, and automate multi-step command sequences that advance
 - **Command sequences** – build a list of steps that run top-to-bottom, each
   advancing *after a delay*, *on an expected response*, or *both*, with retries,
   failure detection, per-step beep-on-match, and looping. Import/export as CSV.
+- **Sequence groups** – run several named sequences back to back; tick or untick
+  each one to include or skip it in the group run without changing the sequence
+  itself.
 - **Live graphing** – plot numeric values parsed from the incoming stream as a
   time series or XY plot, with multiple auto-detected series.
 - **Projects** – save and reload the full workspace (sequences, settings and

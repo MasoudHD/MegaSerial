@@ -112,14 +112,24 @@ class NamedSequence:
     """A named list of steps, used in the Sequence Group tab."""
     name: str = "Sequence"
     steps: list[Step] = field(default_factory=list)
+    # Whether the group run includes this sequence. Independent of Step.enabled.
+    enabled: bool = True
 
     def to_dict(self) -> dict:
-        return {"name": self.name, "steps": [s.to_dict() for s in self.steps]}
+        return {
+            "name": self.name,
+            "steps": [s.to_dict() for s in self.steps],
+            "enabled": self.enabled,
+        }
 
     @classmethod
     def from_dict(cls, d: dict) -> "NamedSequence":
         steps = [Step.from_dict(s) for s in d.get("steps", [])]
-        return cls(name=d.get("name", "Sequence") or "Sequence", steps=steps)
+        # Groups written before this field existed run every sequence.
+        raw_enabled = d.get("enabled", True)
+        enabled = (raw_enabled if isinstance(raw_enabled, bool)
+                   else str(raw_enabled).strip().lower() in ("1", "true", "yes", "y", "on"))
+        return cls(name=d.get("name", "Sequence") or "Sequence", steps=steps, enabled=enabled)
 
 
 CSV_FIELDS = [
@@ -408,7 +418,8 @@ class SequenceGroupRunner(QThread):
             return
 
         total_steps = sum(
-            len([s for s in seq.steps if s.enabled]) for seq in self._sequences
+            len([s for s in seq.steps if s.enabled])
+            for seq in self._sequences if seq.enabled
         )
         if total_steps == 0:
             self.log.emit("No enabled steps in the sequence group.", "warn")
@@ -428,6 +439,10 @@ class SequenceGroupRunner(QThread):
                 if self._stop.is_set():
                     completed = False
                     break
+
+                if not seq.enabled:
+                    self.log.emit(f"[{seq.name}] skipped (disabled)", "info")
+                    continue
 
                 enabled = [s for s in seq.steps if s.enabled]
                 if not enabled:
@@ -466,7 +481,11 @@ class SequenceGroupRunner(QThread):
                 if self._stop.is_set():
                     break
 
-                if seq_idx < len(self._sequences) - 1 and self._delay_between_ms:
+                more_to_run = any(
+                    later.enabled and any(s.enabled for s in later.steps)
+                    for later in self._sequences[seq_idx + 1:]
+                )
+                if more_to_run and self._delay_between_ms:
                     self.log.emit(
                         f"Waiting {self._delay_between_ms} ms before next sequence…", "info")
                     if self._sleep(self._delay_between_ms):

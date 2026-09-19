@@ -234,6 +234,9 @@ class SequenceEditorDialog(QDialog):
         self.name_edit = QLineEdit(sequence.name)
         self.name_edit.setPlaceholderText("e.g. Device init")
         form.addRow("Name", self.name_edit)
+        self.enabled_check = QCheckBox("Run this sequence as part of the group")
+        self.enabled_check.setChecked(sequence.enabled)
+        form.addRow("Enabled", self.enabled_check)
         layout.addLayout(form)
 
         hint = QLabel("Steps run top to bottom. Double-click a row to edit.")
@@ -349,4 +352,5 @@ class SequenceEditorDialog(QDialog):
 
     def result_sequence(self) -> NamedSequence:
         name = self.name_edit.text().strip() or "Sequence"
-        return NamedSequence(name=name, steps=list(self.steps))
+        return NamedSequence(name=name, steps=list(self.steps),
+                             enabled=self.enabled_check.isChecked())

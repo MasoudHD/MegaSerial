@@ -94,6 +94,51 @@ class StepModelTests(unittest.TestCase):
         self.assertEqual(restored.payload_bytes(), b"AT\x1a")
 
 
+class NamedSequenceEnabledTests(unittest.TestCase):
+    def test_a_new_sequence_is_enabled_by_default(self):
+        self.assertTrue(NamedSequence().enabled)
+        self.assertTrue(NamedSequence(name="Init", steps=[Step()]).enabled)
+
+    def test_groups_saved_before_this_field_treat_every_entry_as_enabled(self):
+        legacy = {"name": "Legacy", "steps": [{"name": "Ping", "data": "AT"}]}
+
+        restored = NamedSequence.from_dict(legacy)
+
+        self.assertTrue(restored.enabled)
+        self.assertEqual(restored.steps[0].name, "Ping")
+
+    def test_enabled_state_round_trips_and_accepts_stored_strings(self):
+        for value, expected in ((True, True), (False, False), ("false", False), ("yes", True)):
+            with self.subTest(value=value):
+                restored = NamedSequence.from_dict(
+                    {"name": "Seq", "steps": [], "enabled": value})
+                self.assertEqual(restored.enabled, expected)
+
+        original = NamedSequence(name="Off", steps=[Step(name="A")], enabled=False)
+        self.assertEqual(NamedSequence.from_dict(original.to_dict()), original)
+
+    def test_disabling_a_sequence_leaves_its_steps_untouched(self):
+        sequence = NamedSequence(name="Init", steps=[Step(name="A"), Step(name="B")])
+
+        sequence.enabled = False
+        restored = NamedSequence.from_dict(sequence.to_dict())
+
+        self.assertFalse(restored.enabled)
+        self.assertTrue(all(step.enabled for step in restored.steps))
+
+    def test_ordering_is_preserved_across_mixed_enabled_entries(self):
+        group = [
+            NamedSequence(name="first", steps=[Step()], enabled=True),
+            NamedSequence(name="second", steps=[Step()], enabled=False),
+            NamedSequence(name="third", steps=[Step()], enabled=True),
+        ]
+
+        restored = [NamedSequence.from_dict(s.to_dict()) for s in group]
+
+        self.assertEqual([s.name for s in restored], ["first", "second", "third"])
+        self.assertEqual([s.enabled for s in restored], [True, False, True])
+
+
 class SequenceCsvTests(unittest.TestCase):
     def _import_content(self, content: str, *, encoding: str = "utf-8") -> list[Step]:
         with tempfile.TemporaryDirectory() as directory:
