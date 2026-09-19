@@ -1,12 +1,16 @@
 """Characterization tests for non-widget monitor filtering and HTML rendering."""
 from __future__ import annotations
 
+import csv
 from datetime import datetime, timedelta
+from pathlib import Path
+import tempfile
 import unittest
 
 from MegaSerial.monitor import (
-    DEFAULT_FONT_POINT_SIZE, MAX_FONT_POINT_SIZE, MIN_FONT_POINT_SIZE,
-    clamp_font_point_size, compile_filter, event_matches_filter, event_text, render_html,
+    CSV_COLUMNS, CSV_ENCODING, DEFAULT_FONT_POINT_SIZE, MAX_FONT_POINT_SIZE,
+    MIN_FONT_POINT_SIZE, clamp_font_point_size, compile_filter, event_matches_filter,
+    event_text, events_to_csv_rows, render_html, write_events_csv,
 )
 
 
@@ -75,6 +79,88 @@ class MonitorRenderingTests(unittest.TestCase):
         self.assertIn("03:04:05.373", rendered)
         self.assertIn("\u2014 lost &lt;port&gt;", rendered)
         self.assertIn("#444444", rendered)
+
+
+class MonitorCsvExportTests(unittest.TestCase):
+    def _rows(self, events) -> list[dict]:
+        rows = events_to_csv_rows(events)
+        self.assertEqual(rows[0], CSV_COLUMNS)
+        return [dict(zip(CSV_COLUMNS, row)) for row in rows[1:]]
+
+    def _write_and_read(self, events) -> list[list[str]]:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "log.csv"
+            written = write_events_csv(path, events)
+            self.assertEqual(written, len(events))
+            with open(path, "r", encoding=CSV_ENCODING, newline="") as fh:
+                return list(csv.reader(fh))
+
+    def test_empty_event_collection_exports_only_the_header(self):
+        self.assertEqual(events_to_csv_rows([]), [CSV_COLUMNS])
+        self.assertEqual(self._write_and_read([]), [CSV_COLUMNS])
+
+    def test_rx_and_tx_rows_carry_direction_hex_data_and_decoded_text(self):
+        rows = self._rows([
+            {"type": "data", "dir": "rx", "ts": TS, "data": b"OK\r\n"},
+            {"type": "data", "dir": "tx", "ts": TS, "data": b"\x00\xff"},
+        ])
+
+        self.assertEqual(rows[0]["event_type"], "data")
+        self.assertEqual(rows[0]["direction"], "rx")
+        self.assertEqual(rows[0]["data_format"], "hex")
+        self.assertEqual(rows[0]["data"], "4F 4B 0D 0A")
+        self.assertEqual(rows[0]["text"], "OK\\r\\n")
+        self.assertEqual(rows[1]["direction"], "tx")
+        self.assertEqual(rows[1]["data"], "00 FF")
+        # Log-only columns stay empty for data events.
+        self.assertEqual((rows[0]["log_kind"], rows[0]["message"]), ("", ""))
+
+    def test_log_rows_carry_kind_and_message_without_data_columns(self):
+        rows = self._rows([{"type": "log", "kind": "error", "ts": TS, "msg": "port lost"}])
+
+        self.assertEqual(rows[0]["event_type"], "log")
+        self.assertEqual(rows[0]["log_kind"], "error")
+        self.assertEqual(rows[0]["message"], "port lost")
+        self.assertEqual(
+            (rows[0]["direction"], rows[0]["data_format"], rows[0]["data"]), ("", "", ""))
+
+    def test_index_timestamp_and_elapsed_columns(self):
+        rows = self._rows([
+            {"type": "log", "kind": "info", "ts": TS, "msg": "first"},
+            {"type": "log", "kind": "info", "ts": TS + timedelta(milliseconds=250), "msg": "second"},
+            {"type": "log", "kind": "info", "msg": "no timestamp"},
+        ])
+
+        self.assertEqual([row["index"] for row in rows], [1, 2, 3])
+        self.assertEqual(rows[0]["timestamp"], "2024-01-02 03:04:05.123")
+        self.assertEqual(rows[0]["elapsed_ms"], "")
+        self.assertEqual(rows[1]["elapsed_ms"], 250)
+        self.assertEqual((rows[2]["timestamp"], rows[2]["elapsed_ms"]), ("", ""))
+
+    def test_commas_quotes_and_newlines_survive_a_csv_round_trip(self):
+        message = 'a,b "quoted"\nsecond line'
+        rows = self._write_and_read([{"type": "log", "kind": "warn", "ts": TS, "msg": message}])
+
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(rows[1][CSV_COLUMNS.index("message")], message)
+
+    def test_unicode_survives_in_log_messages_and_rx_payloads(self):
+        rows = self._write_and_read([
+            {"type": "log", "kind": "info", "ts": TS, "msg": "café ✓ дом"},
+            {"type": "data", "dir": "rx", "ts": TS, "data": "café".encode("utf-8")},
+        ])
+
+        self.assertEqual(rows[1][CSV_COLUMNS.index("message")], "café ✓ дом")
+        self.assertEqual(rows[2][CSV_COLUMNS.index("text")], "café")
+        self.assertEqual(rows[2][CSV_COLUMNS.index("data")], "63 61 66 C3 A9")
+
+    def test_export_does_not_mutate_the_exported_events(self):
+        events = [{"type": "data", "dir": "rx", "ts": TS, "data": b"AT"}]
+        before = [dict(ev) for ev in events]
+
+        events_to_csv_rows(events)
+
+        self.assertEqual(events, before)
 
 
 class MonitorZoomTests(unittest.TestCase):

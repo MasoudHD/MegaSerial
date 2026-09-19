@@ -2,9 +2,11 @@
 data stream. Two of these are used side by side for the split view."""
 from __future__ import annotations
 
+import csv
 import html
 import re
 from datetime import datetime
+from pathlib import Path
 
 from PyQt6.QtCore import QEvent, Qt
 from PyQt6.QtGui import QFont, QTextOption
@@ -67,6 +69,82 @@ def event_matches_filter(ev: dict, regex: re.Pattern | None,
         if direction == "tx" and ev.get("dir") != "tx":
             return False
     return bool(regex.search(event_text(ev)))
+
+
+# ---------------------------------------------------------------------------
+# CSV export
+# ---------------------------------------------------------------------------
+
+CSV_COLUMNS = [
+    "index", "timestamp", "elapsed_ms", "event_type", "direction",
+    "data_format", "data", "text", "log_kind", "message",
+]
+CSV_TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S.%f"
+# Excel only auto-detects UTF-8 in a CSV when a BOM is present.
+CSV_ENCODING = "utf-8-sig"
+
+
+def _csv_text(ev: dict) -> str:
+    """One-line rendering of the text the monitor filter matches against."""
+    text = event_text(ev)
+    return text.replace("\\", "\\\\").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
+
+
+def _csv_timestamp(ev: dict) -> str:
+    ts = ev.get("ts")
+    if not isinstance(ts, datetime):
+        return ""
+    return ts.strftime(CSV_TIMESTAMP_FORMAT)[:-3]
+
+
+def event_csv_row(ev: dict, index: int, prev_ts: datetime | None) -> list:
+    """Build one CSV row from a stored monitor event.
+
+    Fields an event does not carry are left empty rather than invented.
+    """
+    ts = ev.get("ts")
+    elapsed = ""
+    if isinstance(ts, datetime) and isinstance(prev_ts, datetime):
+        elapsed = int((ts - prev_ts).total_seconds() * 1000)
+
+    row = {
+        "index": index,
+        "timestamp": _csv_timestamp(ev),
+        "elapsed_ms": elapsed,
+        "event_type": ev.get("type", ""),
+        "text": _csv_text(ev),
+    }
+    if ev.get("type") == "data":
+        row.update({
+            "direction": ev.get("dir", ""),
+            "data_format": "hex",
+            "data": utils.to_hex(ev.get("data", b"") or b""),
+        })
+    elif ev.get("type") == "log":
+        row.update({
+            "log_kind": ev.get("kind", "info"),
+            "message": ev.get("msg", ""),
+        })
+    return [row.get(column, "") for column in CSV_COLUMNS]
+
+
+def events_to_csv_rows(events) -> list[list]:
+    """Return the header row followed by one row per event."""
+    rows = [list(CSV_COLUMNS)]
+    prev_ts = None
+    for index, ev in enumerate(events, start=1):
+        rows.append(event_csv_row(ev, index, prev_ts))
+        if isinstance(ev.get("ts"), datetime):
+            prev_ts = ev["ts"]
+    return rows
+
+
+def write_events_csv(path: str | Path, events) -> int:
+    """Write *events* as CSV and return the number of exported events."""
+    rows = events_to_csv_rows(events)
+    with open(path, "w", encoding=CSV_ENCODING, newline="") as fh:
+        csv.writer(fh).writerows(rows)
+    return len(rows) - 1
 
 
 def render_html(ev: dict, fmt: str, bytes_per_row: int, opts: dict,

@@ -27,7 +27,7 @@ from .about import AboutDialog, DonationDialog
 from .dialogs import ShortcutDialog, StepDialog, SequenceEditorDialog
 from .monitor import (
     MonitorView, compile_filter, event_matches_filter, clamp_font_point_size,
-    DEFAULT_FONT_POINT_SIZE,
+    write_events_csv, DEFAULT_FONT_POINT_SIZE,
 )
 from .graph_panel import GraphPanel
 from .icons import app_logo_pixmap
@@ -315,8 +315,12 @@ class MainWindow(QMainWindow):
         self.clear_btn.clicked.connect(self.clear_monitor)
         self.save_btn = QPushButton("Save log")
         self.save_btn.clicked.connect(self.save_log)
+        self.save_csv_btn = QPushButton("Export CSV")
+        self.save_csv_btn.setToolTip("Export the shown log entries as structured CSV")
+        self.save_csv_btn.clicked.connect(self.export_log_csv)
         tb.addWidget(self.clear_btn)
         tb.addWidget(self.save_btn)
+        tb.addWidget(self.save_csv_btn)
         v.addLayout(tb)
 
         # regex filter row
@@ -958,6 +962,19 @@ class MainWindow(QMainWindow):
             self.status.showMessage(f"Log saved to {path}", 5000)
         except OSError as exc:
             QMessageBox.warning(self, "Save failed", str(exc))
+
+    def export_log_csv(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(self, "Export log CSV", "serial-log.csv",
+                                              "CSV files (*.csv);;All files (*)")
+        if not path:
+            return
+        if not path.lower().endswith(".csv"):
+            path += ".csv"
+        try:
+            count = write_events_csv(path, self._filtered_events())
+            self.status.showMessage(f"Exported {count} log entries to {path}", 5000)
+        except OSError as exc:
+            QMessageBox.warning(self, "Export failed", str(exc))
 
     # ----------------------------------------------------------------- send
     def _write_bytes(self, data: bytes, echo_name: str | None = None) -> bool:

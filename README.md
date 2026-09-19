@@ -47,6 +47,9 @@ plot live numeric data, and automate multi-step command sequences that advance
   text; both split panes stay in step and the level is remembered.
 - **Send** data as ASCII (with `\n \r \t \xHH` escapes), HEX (`48 65` / `0x48`)
   or binary (`01001000`), with a selectable line ending (default **CRLF**).
+- **Log export** – save the monitor as plain text, or as structured CSV
+  (timestamp, elapsed time, direction, hex payload, log message) for analysis in
+  Excel. See [docs/export-formats.md](docs/export-formats.md).
 - **Shortcuts** – save frequently used commands and fire them with a double-click.
 - **History** – every command you send manually is listed; double-click to reload
   it into the send bar, resend, or save it as a shortcut.
