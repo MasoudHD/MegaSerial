@@ -6,6 +6,7 @@ import html
 import re
 from datetime import datetime
 
+from PyQt6.QtCore import QEvent, Qt
 from PyQt6.QtGui import QFont, QTextOption
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QPlainTextEdit,
@@ -16,6 +17,19 @@ from . import utils
 DISPLAY_FORMATS = ["ASCII", "HEX", "Binary", "Hexdump"]
 BYTES_PER_ROW = ["8", "16", "32", "64"]
 _ROW_FORMATS = {"HEX", "Binary", "Hexdump"}
+
+MIN_FONT_POINT_SIZE = 6
+MAX_FONT_POINT_SIZE = 32
+DEFAULT_FONT_POINT_SIZE = 11
+
+
+def clamp_font_point_size(size) -> int:
+    """Coerce *size* to an int inside the supported monitor font range."""
+    try:
+        value = int(size)
+    except (TypeError, ValueError):
+        return DEFAULT_FONT_POINT_SIZE
+    return max(MIN_FONT_POINT_SIZE, min(MAX_FONT_POINT_SIZE, value))
 
 
 def event_text(ev: dict) -> str:
@@ -92,9 +106,12 @@ def render_html(ev: dict, fmt: str, bytes_per_row: int, opts: dict,
 
 class MonitorView(QWidget):
     def __init__(self, fmt: str = "ASCII", bytes_per_row: int = 16,
-                 on_settings_changed=None, max_blocks: int = 6000):
+                 on_settings_changed=None, max_blocks: int = 6000,
+                 font_point_size: int = DEFAULT_FONT_POINT_SIZE,
+                 on_zoom_requested=None):
         super().__init__()
         self._on_change = on_settings_changed
+        self._on_zoom = on_zoom_requested
         self._line_counter = 0
 
         v = QVBoxLayout(self)
@@ -125,11 +142,42 @@ class MonitorView(QWidget):
         self.edit.setWordWrapMode(QTextOption.WrapMode.WrapAnywhere)
         mono = QFont("Monospace")
         mono.setStyleHint(QFont.StyleHint.TypeWriter)
-        mono.setPointSize(11)
+        mono.setPointSize(clamp_font_point_size(font_point_size))
         self.edit.setFont(mono)
+        self.edit.viewport().installEventFilter(self)
         v.addWidget(self.edit, 1)
 
         self._sync_row_enabled()
+
+    # -- zoom --------------------------------------------------------------
+    @property
+    def font_point_size(self) -> int:
+        return clamp_font_point_size(self.edit.font().pointSize())
+
+    def set_font_point_size(self, size) -> int:
+        """Apply a clamped presentation font size and return what was applied."""
+        applied = clamp_font_point_size(size)
+        font = self.edit.font()
+        font.setPointSize(applied)
+        self.edit.setFont(font)
+        return applied
+
+    def zoom_by(self, steps: int) -> None:
+        """Handle a zoom gesture, delegating to the owner when one is set."""
+        if self._on_zoom is not None:
+            self._on_zoom(steps)
+        else:
+            self.set_font_point_size(self.font_point_size + steps)
+
+    def eventFilter(self, obj, event):
+        # Ctrl+wheel zooms; a plain wheel falls through to normal scrolling.
+        if obj is self.edit.viewport() and event.type() == QEvent.Type.Wheel:
+            if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                delta = event.angleDelta().y()
+                if delta:
+                    self.zoom_by(1 if delta > 0 else -1)
+                return True
+        return super().eventFilter(obj, event)
 
     # -- settings ----------------------------------------------------------
     def _sync_row_enabled(self) -> None:

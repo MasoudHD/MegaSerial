@@ -4,7 +4,10 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 import unittest
 
-from MegaSerial.monitor import compile_filter, event_matches_filter, event_text, render_html
+from MegaSerial.monitor import (
+    DEFAULT_FONT_POINT_SIZE, MAX_FONT_POINT_SIZE, MIN_FONT_POINT_SIZE,
+    clamp_font_point_size, compile_filter, event_matches_filter, event_text, render_html,
+)
 
 
 COLORS = {
@@ -72,6 +75,18 @@ class MonitorRenderingTests(unittest.TestCase):
         self.assertIn("03:04:05.373", rendered)
         self.assertIn("\u2014 lost &lt;port&gt;", rendered)
         self.assertIn("#444444", rendered)
+
+
+class MonitorZoomTests(unittest.TestCase):
+    def test_clamp_keeps_sizes_inside_the_supported_range(self):
+        self.assertEqual(clamp_font_point_size(MIN_FONT_POINT_SIZE - 5), MIN_FONT_POINT_SIZE)
+        self.assertEqual(clamp_font_point_size(MAX_FONT_POINT_SIZE + 5), MAX_FONT_POINT_SIZE)
+        self.assertEqual(clamp_font_point_size(14), 14)
+
+    def test_clamp_falls_back_to_the_default_for_unusable_values(self):
+        for value in (None, "big", object()):
+            with self.subTest(value=value):
+                self.assertEqual(clamp_font_point_size(value), DEFAULT_FONT_POINT_SIZE)
 
 
 if __name__ == "__main__":

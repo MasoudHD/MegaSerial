@@ -8,7 +8,7 @@ from collections import deque
 from datetime import datetime
 
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QFormLayout,
     QGroupBox, QLabel, QComboBox, QPushButton, QCheckBox, QLineEdit,
@@ -25,7 +25,10 @@ from .sequence import (
 )
 from .about import AboutDialog, DonationDialog
 from .dialogs import ShortcutDialog, StepDialog, SequenceEditorDialog
-from .monitor import MonitorView, compile_filter, event_matches_filter
+from .monitor import (
+    MonitorView, compile_filter, event_matches_filter, clamp_font_point_size,
+    DEFAULT_FONT_POINT_SIZE,
+)
 from .graph_panel import GraphPanel
 from .icons import app_logo_pixmap
 from . import project as project_io
@@ -59,6 +62,8 @@ class MainWindow(QMainWindow):
         self._history_nav_setting = False  # guard for programmatic text changes
         self.mode = "dark"
         self.colors = theme.COLORS["dark"]
+        self._monitor_font_pt = clamp_font_point_size(
+            self.cfg.get("monitor_font_point_size", DEFAULT_FONT_POINT_SIZE))
         # RX line-assembly (line mode)
         self._rx_buf = bytearray()
         self._rx_flush_timer = QTimer(self)
@@ -343,13 +348,18 @@ class MainWindow(QMainWindow):
         self.view_splitter = QSplitter(Qt.Orientation.Horizontal)
         self.view1 = MonitorView(fmt=self.cfg.get("view1_format", "ASCII"),
                                  bytes_per_row=self.cfg.get("view1_bytes_per_row", 16),
-                                 on_settings_changed=self._rerender_view)
+                                 on_settings_changed=self._rerender_view,
+                                 font_point_size=self._monitor_font_pt,
+                                 on_zoom_requested=self.zoom_monitor)
         self.view2 = MonitorView(fmt=self.cfg.get("view2_format", "HEX"),
                                  bytes_per_row=self.cfg.get("view2_bytes_per_row", 16),
-                                 on_settings_changed=self._rerender_view)
+                                 on_settings_changed=self._rerender_view,
+                                 font_point_size=self._monitor_font_pt,
+                                 on_zoom_requested=self.zoom_monitor)
         self.view_splitter.addWidget(self.view1)
         self.view_splitter.addWidget(self.view2)
         self.views = [self.view1, self.view2]
+        self._install_zoom_shortcuts()
         self.graph_panel = GraphPanel()
         self.graph_panel.mode_combo.currentIndexChanged.connect(self._on_graph_settings_changed)
         self.center_splitter.addWidget(self.view_splitter)
@@ -577,6 +587,8 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------ settings <-> UI
     def _load_settings_into_ui(self) -> None:
         c = self.cfg
+        self._monitor_font_pt = clamp_font_point_size(
+            c.get("monitor_font_point_size", DEFAULT_FONT_POINT_SIZE))
         self.theme_combo.setCurrentText(c.get("theme", "system").capitalize())
         self._apply_theme(c.get("theme", "system"))
         self.baud_combo.setCurrentText(str(c.get("baudrate", 115200)))
@@ -623,6 +635,7 @@ class MainWindow(QMainWindow):
             "show_direction": self.dir_check.isChecked(),
             "autoscroll": self.autoscroll_check.isChecked(),
             "show_line_numbers": self.linenum_check.isChecked(),
+            "monitor_font_point_size": self._monitor_font_pt,
             "line_mode": self.linemode_check.isChecked(),
             "send_format": self.send_fmt_combo.currentText(),
             "line_ending": self.line_ending_combo.currentText(),
@@ -669,6 +682,8 @@ class MainWindow(QMainWindow):
         if hasattr(self, "graph_panel"):
             self.graph_panel.apply_theme(self.mode)
         if hasattr(self, "views"):
+            # The theme stylesheet resets widget fonts, so restore the zoom level.
+            self._apply_monitor_zoom()
             self._rerender_all()
 
     # ----------------------------------------------------------- ports/conn
@@ -795,6 +810,22 @@ class MainWindow(QMainWindow):
 
     def _active_views(self) -> list:
         return self.views if self.split_check.isChecked() else [self.view1]
+
+    # ------------------------------------------------------------ monitor zoom
+    def _install_zoom_shortcuts(self) -> None:
+        for keys, steps in (("Ctrl++", 1), ("Ctrl+=", 1), ("Ctrl+-", -1), ("Ctrl+_", -1)):
+            sc = QShortcut(QKeySequence(keys), self)
+            sc.activated.connect(lambda s=steps: self.zoom_monitor(s))
+
+    def zoom_monitor(self, steps: int) -> int:
+        """Change the shared monitor font size so both views stay in step."""
+        self._monitor_font_pt = clamp_font_point_size(self._monitor_font_pt + steps)
+        self._apply_monitor_zoom()
+        return self._monitor_font_pt
+
+    def _apply_monitor_zoom(self) -> None:
+        for view in self.views:
+            view.set_font_point_size(self._monitor_font_pt)
 
     def _compile_filter(self) -> None:
         pattern = self.filter_pattern.text()

@@ -101,6 +101,7 @@ DEFAULTS = {
     "show_direction": True,
     "autoscroll": True,
     "show_line_numbers": False,
+    "monitor_font_point_size": 11,
     "line_mode": True,
     "send_format": "ASCII",
     "line_ending": "CRLF (\\r\\n)",
