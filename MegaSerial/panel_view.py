@@ -1,9 +1,10 @@
 """Panel presentation and configuration, reusing the normal monitor renderer."""
 from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QTextCursor
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QMenu,
     QDialog, QDialogButtonBox, QSpinBox, QFormLayout, QTableWidget,
-    QTableWidgetItem, QHeaderView, QMessageBox, QScrollArea,
+    QTableWidgetItem, QHeaderView, QMessageBox, QScrollArea, QSizePolicy,
 )
 from .monitor import MonitorView
 from .panel_model import PanelWorkspace, GENERAL, MAX_ROWS, MAX_COLUMNS
@@ -97,11 +98,12 @@ class PanelWidget(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(3, 3, 3, 3)
         self.header = QLabel()
+        self.header.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.header.setTextFormat(Qt.TextFormat.PlainText)
         self.header.setText(panel["title"])
         self.header.setToolTip("ID: " + panel["id"])
         layout.addWidget(self.header)
-        self.monitor = MonitorView(font_point_size=font_size, on_zoom_requested=on_zoom)
+        self.monitor = MonitorView(font_point_size=font_size, on_zoom_requested=on_zoom, max_blocks=0)
         # Keep the reusable monitor and hide only its format toolbar.
         head = self.monitor.layout().itemAt(0).layout()
         for i in range(head.count()):
@@ -119,6 +121,7 @@ class PanelView(QScrollArea):
         self.font_size, self.on_zoom = font_size, on_zoom
         self.widgets = {}
         self.previous = {}
+        self.rendered_blocks = {}
         self.scope_button = QPushButton("Panels ▾")
         self.scope_menu = QMenu(self.scope_button)
         self.scope_button.setMenu(self.scope_menu)
@@ -143,6 +146,7 @@ class PanelView(QScrollArea):
         layout = QVBoxLayout(body)
         self.widgets = {}
         self.previous = {}
+        self.rendered_blocks = {}
         idx = 0
         for count in self.workspace.row_counts:
             row = QHBoxLayout()
@@ -164,6 +168,7 @@ class PanelView(QScrollArea):
         all_action.triggered.connect(self._all_scope)
         for ident, title in self.workspace.titles().items():
             self.widgets[ident].header.setText(title)
+            self.widgets[ident].header.setToolTip(f"{title}\nID: {ident}")
             action = self.scope_menu.addAction(f"{title} ({ident})")
             action.setCheckable(True)
             action.setChecked(self.workspace.in_scope(ident))
@@ -192,11 +197,35 @@ class PanelView(QScrollArea):
             widget.monitor.set_font_point_size(size)
 
     def append_event(self, ev, opts, predicate):
+        event_key = id(ev)
         ev = panel_event(ev)
         if self.workspace.accepts(ev, predicate):
             ident = self.workspace.destination(ev)
-            self.widgets[ident].monitor.append_event(ev, opts, self.previous.get(ident))
+            monitor = self.widgets[ident].monitor
+            before = 0 if monitor.edit.document().isEmpty() else monitor.edit.blockCount()
+            monitor.append_event(ev, {**opts, "unicode_text": True}, self.previous.get(ident))
+            self.rendered_blocks[event_key] = (ident, monitor.edit.blockCount() - before)
             self.previous[ident] = ev.get("ts")
+
+    def forget_event(self, ev):
+        """Trim presentation blocks when the shared event deque evicts an entry.
+
+        Only block counts and object identities are cached, never event data.
+        """
+        entry = self.rendered_blocks.pop(id(ev), None)
+        if entry is None:
+            return
+        ident, count = entry
+        edit = self.widgets[ident].monitor.edit
+        if count >= edit.blockCount():
+            edit.clear()
+            self.previous.pop(ident, None)
+        else:
+            cursor = QTextCursor(edit.document())
+            cursor.movePosition(QTextCursor.MoveOperation.Start)
+            cursor.movePosition(QTextCursor.MoveOperation.NextBlock,
+                                QTextCursor.MoveMode.KeepAnchor, count)
+            cursor.removeSelectedText()
 
     def rerender(self, events, opts, predicate):
         self.clear()
@@ -205,6 +234,7 @@ class PanelView(QScrollArea):
 
     def clear(self):
         self.previous.clear()
+        self.rendered_blocks.clear()
         for widget in self.widgets.values():
             widget.monitor.clear()
 

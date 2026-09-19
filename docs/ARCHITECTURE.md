@@ -75,3 +75,30 @@ Do not create a generic controller, repository, interface, or model layer pre-em
 - Keep sequence code dependent on an injected send operation and RX monitor, rather than directly on pyserial.
 - Preserve bundled fallback behavior for optional remote metadata.
 - Keep persistence formats backward compatible or versioned/migrated.
+
+## Panel View extension
+
+Panel View is an additive presentation of the shared monitor event deque:
+
+```text
+SerialWorker → MainWindow.on_data_received → RxMonitor (unchanged raw bytes)
+                      ↓ existing line assembly (Line mode only)
+               PanelProtocolParser → optional metadata → shared events
+                                                           ├→ MonitorView (raw)
+                                                           ├→ GraphPanel (raw)
+                                                           └→ PanelView → MonitorView (payload)
+```
+
+`panel_protocol.py` parses complete strict UTF-8 lines without Qt and provides a
+nonmutating presentation projection. `panel_model.py` owns project layout,
+validation, destination fallback, titles and search scope without Qt or event
+storage. `panel_view.py` owns the configuration dialog, scope menu and layout of
+compact reusable monitor widgets. `MainWindow` connects these to the existing
+line pipeline, presentation switch, global options and project/export actions.
+Raw mode never interprets panel commands. Sequence matching always receives the
+original serial bytes before interpretation.
+
+`project.py` accepts optional top-level panel workspace metadata without changing
+format version 1. It is deliberately separate from global config. `monitor.py`
+provides optional panel columns in its existing CSV exporter; normal CSV stays
+compatible. See [Panel View](panel-view.md) for schema, protocol and limitations.

@@ -187,7 +187,9 @@ def render_html(ev: dict, fmt: str, bytes_per_row: int, opts: dict,
     color = colors["tx"] if direction == "tx" else colors["rx"]
     if opts.get("show_dir"):
         prefix += f'<span style="color:{color}">{direction_symbol(direction)} </span>'
-    body = utils.format_output(ev["data"], fmt, bytes_per_row)
+    body = (ev["data"].decode("utf-8", errors="replace")
+            if fmt == "ASCII" and opts.get("unicode_text")
+            else utils.format_output(ev["data"], fmt, bytes_per_row))
     if fmt == "ASCII":
         # Drop carriage returns and the trailing newline so line-oriented text
         # (e.g. AT commands) shows as one clean line per entry.

@@ -827,6 +827,8 @@ class MainWindow(QMainWindow):
         self.worker.set_rts(self.rts_btn.isChecked())
 
     def on_serial_closed(self) -> None:
+        self._flush_rx_buffer(force=True)
+        self._rx_line_start = True
         self.connect_btn.setEnabled(True)
         self.connect_btn.setText("Connect")
         self._set_connected_ui(False)
@@ -943,17 +945,16 @@ class MainWindow(QMainWindow):
     def _emit_event(self, ev: dict) -> None:
         visible = list(self._filtered_events())
         prev_ts = visible[-1]["ts"] if visible else None
-        evicted = len(self.events) == self.events.maxlen
+        evicted = self.events[0] if len(self.events) == self.events.maxlen else None
         self.events.append(ev)
         opts = self._global_opts()
         if self._event_passes_filter(ev):
             for view in self._active_views():
                 view.append_event(ev, opts, prev_ts)
         if self.panel_view.workspace.active:
-            if evicted:
-                self.panel_view.rerender(self.events, opts, self._event_passes_filter)
-            else:
-                self.panel_view.append_event(ev, opts, self._event_passes_filter)
+            if evicted is not None:
+                self.panel_view.forget_event(evicted)
+            self.panel_view.append_event(ev, opts, self._event_passes_filter)
         if self.graph_view_check.isChecked():
             self.graph_panel.feed_event(ev)
 

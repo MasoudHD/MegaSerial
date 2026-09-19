@@ -281,3 +281,11 @@ Released under the **MIT License**. See [LICENSE](LICENSE) for details.
 If you find MegaSerial useful, you can support its development via
 [Buy Me a Coffee](https://buymeacoffee.com/masoudhd) or
 [Donito](https://donito.me/masoudheidari).
+
+### Panel View
+
+Use **Panel View** and **Configure panels…** for a matrix of independent monitors.
+In Line mode, route UTF-8 lines with `@PANEL:gps|payload` and update titles with
+`@PANEL_TITLE:gps|GPS Receiver`. General preserves ordinary and unknown-panel data.
+Layouts, titles, search scope and active presentation are saved in `.msproj`.
+See the [Panel View guide](docs/panel-view.md) for setup, search and export details.

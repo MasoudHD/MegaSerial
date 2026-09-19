@@ -86,3 +86,10 @@ Numbers are written with Python's default float formatting, which round-trips
 exactly, so reading the file back gives the same values that were plotted.
 Only points still held by the graph are exported: the **Max pts** setting
 discards older samples from the live buffer, and the export reflects that.
+
+## Panel View exports
+
+Panel View reuses monitor CSV export with additional `panel_id` and `panel_title`
+columns. `text` is the panel payload; `data` remains raw serial bytes in hex.
+Normal Monitor CSV is unchanged. Text export groups displayed entries under panel
+headers. See [Panel View](panel-view.md) for scoped filtering and fallback rules.
