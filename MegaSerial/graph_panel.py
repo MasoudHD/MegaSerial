@@ -1,13 +1,15 @@
 """Live plot pane for numeric serial data (time series and XY)."""
 from __future__ import annotations
 
+import csv
 from collections import deque
 from datetime import datetime
+from pathlib import Path
 
 import pyqtgraph as pg
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QSpinBox,
-    QPushButton, QCheckBox,
+    QPushButton, QCheckBox, QFileDialog, QMessageBox,
 )
 
 from .data_parser import (
@@ -18,6 +20,37 @@ _SERIES_COLORS = [
     "#3b82f6", "#22c55e", "#f59e0b", "#ef4444", "#a855f7",
     "#06b6d4", "#ec4899", "#84cc16",
 ]
+
+# ---------------------------------------------------------------------------
+# CSV export
+# ---------------------------------------------------------------------------
+
+# One row per plotted point ("long" format). Series keep independent x values,
+# so a shared-x wide layout could not represent the data without inventing
+# values for the gaps.
+GRAPH_CSV_COLUMNS = ["series", "point_index", "x", "y"]
+GRAPH_CSV_ENCODING = "utf-8-sig"
+
+
+def series_csv_rows(series_data) -> list[list]:
+    """Header row plus one row per plotted point, in series then plot order.
+
+    *series_data* maps a series name to ``{"x": ..., "y": ...}`` sequences.
+    Values are written as Python floats, which round-trip exactly.
+    """
+    rows = [list(GRAPH_CSV_COLUMNS)]
+    for name, points in series_data.items():
+        for index, (x, y) in enumerate(zip(points["x"], points["y"]), start=1):
+            rows.append([name, index, x, y])
+    return rows
+
+
+def write_series_csv(path: str | Path, series_data) -> int:
+    """Write the plotted points as CSV and return the number of points."""
+    rows = series_csv_rows(series_data)
+    with open(path, "w", encoding=GRAPH_CSV_ENCODING, newline="") as fh:
+        csv.writer(fh).writerows(rows)
+    return len(rows) - 1
 
 
 class GraphPanel(QWidget):
@@ -68,6 +101,16 @@ class GraphPanel(QWidget):
         self.clear_btn = QPushButton("Clear graph")
         self.clear_btn.clicked.connect(self.clear)
         bar.addWidget(self.clear_btn)
+
+        self.export_image_btn = QPushButton("Save image")
+        self.export_image_btn.setToolTip("Save the plotted graph as a PNG image")
+        self.export_image_btn.clicked.connect(self.export_image_dialog)
+        bar.addWidget(self.export_image_btn)
+
+        self.export_csv_btn = QPushButton("Export CSV")
+        self.export_csv_btn.setToolTip("Export the plotted data points as CSV")
+        self.export_csv_btn.clicked.connect(self.export_csv_dialog)
+        bar.addWidget(self.export_csv_btn)
         bar.addStretch(1)
 
         self.stats_label = QLabel("")
@@ -142,6 +185,65 @@ class GraphPanel(QWidget):
         self.plot.clear()
         self.plot.addLegend(offset=(10, 10))
         self.stats_label.setText("")
+
+    # -------------------------------------------------------------- exporting
+    def series_snapshot(self) -> dict[str, dict[str, list]]:
+        """Copy of the plotted points, so exporting cannot disturb live data."""
+        return {name: {"x": list(points["x"]), "y": list(points["y"])}
+                for name, points in self._series_data.items()}
+
+    def csv_rows(self) -> list[list]:
+        return series_csv_rows(self.series_snapshot())
+
+    def export_csv(self, path: str | Path) -> int:
+        return write_series_csv(path, self.series_snapshot())
+
+    def export_image(self, path: str | Path) -> None:
+        """Save the plot area, as currently displayed, to an image file."""
+        from pyqtgraph.exporters import ImageExporter
+
+        ImageExporter(self.plot.getPlotItem()).export(str(path))
+
+    def has_data(self) -> bool:
+        return any(points["y"] for points in self._series_data.values())
+
+    def export_csv_dialog(self) -> None:
+        if not self._warn_if_empty():
+            return
+        path, _ = QFileDialog.getSaveFileName(self, "Export graph CSV", "graph.csv",
+                                              "CSV files (*.csv);;All files (*)")
+        if not path:
+            return
+        if not path.lower().endswith(".csv"):
+            path += ".csv"
+        try:
+            count = self.export_csv(path)
+        except OSError as exc:
+            QMessageBox.warning(self, "Export failed", str(exc))
+            return
+        self.stats_label.setText(f"Exported {count} points")
+
+    def export_image_dialog(self) -> None:
+        if not self._warn_if_empty():
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save graph image", "graph.png",
+            "PNG image (*.png);;All files (*)")
+        if not path:
+            return
+        if not Path(path).suffix:
+            path += ".png"
+        try:
+            self.export_image(path)
+        except (OSError, ValueError) as exc:
+            QMessageBox.warning(self, "Save failed", str(exc))
+
+    def _warn_if_empty(self) -> bool:
+        if self.has_data():
+            return True
+        QMessageBox.information(self, "Empty graph",
+                                "There is no plotted data to export yet.")
+        return False
 
     # ----------------------------------------------------------------- internals
     def _on_settings_changed(self, *_args) -> None:

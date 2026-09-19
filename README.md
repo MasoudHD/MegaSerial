@@ -65,7 +65,8 @@ plot live numeric data, and automate multi-step command sequences that advance
   each one to include or skip it in the group run without changing the sequence
   itself.
 - **Live graphing** – plot numeric values parsed from the incoming stream as a
-  time series or XY plot, with multiple auto-detected series.
+  time series or XY plot, with multiple auto-detected series. Save the plot as a
+  PNG or export the plotted points as CSV.
 - **Projects** – save and reload the full workspace (sequences, settings and
   captured logs) as a single `.msproj` file. The open project is shown in the
   window title, and a project can be passed on the command line or opened by

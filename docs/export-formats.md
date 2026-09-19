@@ -43,3 +43,46 @@ as UTF-8 with replacement characters for invalid sequences, or the log message
 for log events.
 
 Exporting never modifies the captured events; it only reads them.
+
+## Graph
+
+The graph toolbar offers **Save image** and **Export CSV**. Both read the data
+the graph is currently holding; neither changes live plotting, and an empty
+graph is reported instead of writing an empty file.
+
+### Graph image
+
+**Save image** writes a **PNG** of the plot area as displayed: axes, grid,
+labels and the currently plotted series. The image is rendered from the plot
+itself, so it is not a screenshot of the surrounding window.
+
+### Graph CSV
+
+Written as UTF-8 with a BOM (`utf-8-sig`), one row per plotted point:
+
+```csv
+series,point_index,x,y
+```
+
+| Column        | Contents                                                        |
+| ------------- | --------------------------------------------------------------- |
+| `series`      | Series name, as auto-detected from the incoming data             |
+| `point_index` | 1-based position within that series, restarting for each series  |
+| `x`           | Plotted x value (see below)                                      |
+| `y`           | Plotted value                                                    |
+
+This is a **long** format: every series appears as its own block of rows rather
+than as its own column. Series are detected independently, so they can have
+different lengths and different x values; a wide, shared-x layout would have to
+invent values to fill the gaps.
+
+The meaning of `x` follows the graph mode:
+
+- **Time series / Auto** — seconds since the first plotted sample, or the sample
+  index when the data carries no timestamp.
+- **XY pairs** — the X value parsed from the data.
+
+Numbers are written with Python's default float formatting, which round-trips
+exactly, so reading the file back gives the same values that were plotted.
+Only points still held by the graph are exported: the **Max pts** setting
+discards older samples from the live buffer, and the export reflects that.
