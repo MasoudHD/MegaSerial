@@ -9,8 +9,9 @@ import unittest
 
 from MegaSerial.monitor import (
     CSV_COLUMNS, CSV_ENCODING, DEFAULT_FONT_POINT_SIZE, MAX_FONT_POINT_SIZE,
-    MIN_FONT_POINT_SIZE, clamp_font_point_size, compile_filter, event_matches_filter,
-    event_text, events_to_csv_rows, render_html, write_events_csv,
+    DIRECTION_SYMBOLS, MIN_FONT_POINT_SIZE, clamp_font_point_size, compile_filter,
+    direction_symbol, event_matches_filter, event_text, events_to_csv_rows, render_html,
+    write_events_csv,
 )
 
 
@@ -64,7 +65,7 @@ class MonitorRenderingTests(unittest.TestCase):
 
         self.assertIn("    7 ", rendered)
         self.assertIn("03:04:05.123", rendered)
-        self.assertIn("\u2190", rendered)
+        self.assertIn(DIRECTION_SYMBOLS["rx"], rendered)
         self.assertIn("&lt;tag&gt;", rendered)
         self.assertNotIn("<tag>", rendered)
         self.assertNotIn("<br>", rendered)
@@ -79,6 +80,34 @@ class MonitorRenderingTests(unittest.TestCase):
         self.assertIn("03:04:05.373", rendered)
         self.assertIn("\u2014 lost &lt;port&gt;", rendered)
         self.assertIn("#444444", rendered)
+
+
+class MonitorDirectionSymbolTests(unittest.TestCase):
+    def test_rx_and_tx_use_distinct_directional_symbols(self):
+        self.assertEqual(direction_symbol("rx"), DIRECTION_SYMBOLS["rx"])
+        self.assertEqual(direction_symbol("tx"), DIRECTION_SYMBOLS["tx"])
+        self.assertNotEqual(DIRECTION_SYMBOLS["rx"], DIRECTION_SYMBOLS["tx"])
+
+    def test_unknown_direction_renders_as_incoming(self):
+        self.assertEqual(direction_symbol(""), DIRECTION_SYMBOLS["rx"])
+
+    def test_rendering_shows_the_symbol_only_when_direction_is_enabled(self):
+        event = {"type": "data", "dir": "tx", "ts": TS, "data": b"AT"}
+
+        self.assertIn(DIRECTION_SYMBOLS["tx"], render_html(event, "ASCII", 16, OPTS))
+        hidden = render_html(event, "ASCII", 16, {**OPTS, "show_dir": False})
+        self.assertNotIn(DIRECTION_SYMBOLS["tx"], hidden)
+
+    def test_symbols_are_presentation_only_and_do_not_reach_data_or_filtering(self):
+        event = {"type": "data", "dir": "tx", "ts": TS, "data": b"AT"}
+
+        # Filtering still matches on payload text, never on the rendered symbol.
+        self.assertTrue(event_matches_filter(event, compile_filter("AT"), "tx"))
+        self.assertFalse(event_matches_filter(event, compile_filter("AT"), "rx"))
+        # CSV export keeps the semantic direction value.
+        row = dict(zip(CSV_COLUMNS, events_to_csv_rows([event])[1]))
+        self.assertEqual(row["direction"], "tx")
+        self.assertNotIn(DIRECTION_SYMBOLS["tx"], row["text"])
 
 
 class MonitorCsvExportTests(unittest.TestCase):

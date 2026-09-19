@@ -20,6 +20,15 @@ DISPLAY_FORMATS = ["ASCII", "HEX", "Binary", "Hexdump"]
 BYTES_PER_ROW = ["8", "16", "32", "64"]
 _ROW_FORMATS = {"HEX", "Binary", "Hexdump"}
 
+# Presentation only. Events keep the semantic "rx"/"tx" direction values that
+# filtering, CSV export and project files rely on.
+DIRECTION_SYMBOLS = {"rx": "⬅️", "tx": "➡️"}
+
+
+def direction_symbol(direction: str) -> str:
+    """Emoji shown for an event direction; anything but ``tx`` reads as incoming."""
+    return DIRECTION_SYMBOLS.get(direction, DIRECTION_SYMBOLS["rx"])
+
 MIN_FONT_POINT_SIZE = 6
 MAX_FONT_POINT_SIZE = 32
 DEFAULT_FONT_POINT_SIZE = 11
@@ -171,8 +180,7 @@ def render_html(ev: dict, fmt: str, bytes_per_row: int, opts: dict,
     direction = ev["dir"]
     color = colors["tx"] if direction == "tx" else colors["rx"]
     if opts.get("show_dir"):
-        arrow = "→" if direction == "tx" else "←"
-        prefix += f'<span style="color:{color}">{arrow} </span>'
+        prefix += f'<span style="color:{color}">{direction_symbol(direction)} </span>'
     body = utils.format_output(ev["data"], fmt, bytes_per_row)
     if fmt == "ASCII":
         # Drop carriage returns and the trailing newline so line-oriented text
