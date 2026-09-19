@@ -6,6 +6,7 @@ import json
 from copy import deepcopy
 from collections import deque
 from datetime import datetime
+from pathlib import Path
 
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont, QKeySequence, QShortcut
@@ -39,6 +40,15 @@ BAUD_RATES = ["300", "1200", "2400", "4800", "9600", "19200", "38400",
               "57600", "115200", "230400", "460800", "921600"]
 MAX_EVENTS = 6000
 MAX_HISTORY = 200
+
+BASE_WINDOW_TITLE = f"{__app_name__} v{__version__} - Serial Monitor"
+
+
+def window_title(project_path: str | None) -> str:
+    """Window title for the given active project file, or none."""
+    if not project_path:
+        return BASE_WINDOW_TITLE
+    return f"{__app_name__} v{__version__} — {Path(project_path).name}"
 
 # Column layout of the Sequence Group table.
 GROUP_COL_ON = 0
@@ -80,7 +90,10 @@ class MainWindow(QMainWindow):
         self._rx_flush_timer.setSingleShot(True)
         self._rx_flush_timer.timeout.connect(self._flush_rx_buffer)
 
-        self.setWindowTitle(f"{__app_name__} v{__version__} - Serial Monitor")
+        # Path of the .msproj currently open, set only by opening or saving one.
+        # Deliberately not derived from the saved config, which may be stale.
+        self._project_path: str | None = None
+        self.setWindowTitle(window_title(None))
         self.resize(1280, 780)
         self._build_ui()
         self._load_settings_into_ui()
@@ -1543,8 +1556,14 @@ class MainWindow(QMainWindow):
         self.status.showMessage(msg, 4000)
 
     # -------------------------------------------------------------- project
+    def _set_project_path(self, path: str | None) -> None:
+        """Record the active project file and reflect it in the window title."""
+        self._project_path = str(path) if path else None
+        self.setWindowTitle(window_title(self._project_path))
+
     def save_project(self) -> None:
-        default_name = (self.project_name_edit.text().strip() or "project") + ".msproj"
+        default_name = self._project_path or (
+            (self.project_name_edit.text().strip() or "project") + ".msproj")
         path, _ = QFileDialog.getSaveFileName(
             self, "Save project", default_name,
             "MegaSerial project (*.msproj);;JSON files (*.json);;All files (*)")
@@ -1559,6 +1578,7 @@ class MainWindow(QMainWindow):
         )
         try:
             project_io.save_project(path, data)
+            self._set_project_path(path)
             self.status.showMessage(f"Project saved to {path}", 5000)
         except OSError as exc:
             QMessageBox.warning(self, "Save failed", str(exc))
@@ -1602,6 +1622,7 @@ class MainWindow(QMainWindow):
         if self.graph_view_check.isChecked():
             self._replay_graph()
 
+        self._set_project_path(path)
         self.status.showMessage(f"Imported project from {path}", 5000)
 
     # ---------------------------------------------------------------- close
