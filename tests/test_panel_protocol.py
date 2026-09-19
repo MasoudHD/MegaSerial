@@ -6,6 +6,7 @@ class ProtocolTests(unittest.TestCase):
     def test_commands(self):
         parser = PanelProtocolParser()
         for line, kind, ident, payload in [
+            ("@PANEL:32|Position test\n", "data", "32", "Position test"),
             ("@PANEL:gps|Fix\n", "data", "gps", "Fix"),
             ("@PANEL:sensor7|\r\n", "data", "sensor7", ""),
             ("@PANEL:موقع|سلام|✓\n", "data", "موقع", "سلام|✓"),

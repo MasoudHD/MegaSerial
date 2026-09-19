@@ -285,7 +285,8 @@ If you find MegaSerial useful, you can support its development via
 ### Panel View
 
 Use **Panel View** and **Configure panels…** for a matrix of independent monitors.
-In Line mode, route UTF-8 lines with `@PANEL:gps|payload` and update titles with
-`@PANEL_TITLE:gps|GPS Receiver`. General preserves ordinary and unknown-panel data.
-Layouts, titles, search scope and active presentation are saved in `.msproj`.
+In Line mode, route UTF-8 lines with `@PANEL:32|payload` and update titles with
+`@PANEL_TITLE:32|GPS Receiver`. General preserves ordinary and unknown-panel data.
+IDs are assigned automatically by row and column (`32` = row 3, column 2);
+titles are optional. Layouts, titles, search scope and active presentation are saved in `.msproj`.
 See the [Panel View guide](docs/panel-view.md) for setup, search and export details.

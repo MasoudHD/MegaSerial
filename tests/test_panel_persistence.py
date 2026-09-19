@@ -11,10 +11,10 @@ class PanelPersistenceTests(unittest.TestCase):
     def test_roundtrip(self):
         w = workspace()
         w.active = True
-        w.scope = ['gps', 'can']
-        w.update_title('gps', 'گیرنده')
+        w.scope = ['12', '21']
+        w.update_title('12', 'گیرنده')
         events = [{'type': 'data', 'dir': 'rx', 'ts': datetime.now(),
-                   'data': b'@PANEL:gps|OK\n', 'panel_id': 'gps', 'panel_payload': 'OK'},
+                   'data': b'@PANEL:12|OK\n', 'panel_id': '12', 'panel_payload': 'OK'},
                   {'type': 'data', 'dir': 'tx', 'data': b'AT'}]
         data = project.collect_project_data(project_name='Panel', settings={}, events=events,
                                             panel_view=w.to_dict())
@@ -25,7 +25,7 @@ class PanelPersistenceTests(unittest.TestCase):
         self.assertEqual(data['format_version'], 1)
         self.assertEqual(PanelWorkspace.restore(loaded['panel_view']).to_dict(), w.to_dict())
         self.assertEqual(loaded['events'], events)
-        self.assertEqual(w.destination(loaded['events'][1]), 'general')
+        self.assertEqual(w.destination(loaded['events'][1]), '11')
 
     def test_old_project_and_old_event(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -35,4 +35,28 @@ class PanelPersistenceTests(unittest.TestCase):
         w = PanelWorkspace.restore(loaded['panel_view'])
         self.assertFalse(w.active)
         self.assertEqual(w.row_counts, [1])
-        self.assertEqual(w.destination(loaded['events'][0]), 'general')
+        self.assertEqual(w.destination(loaded['events'][0]), '11')
+
+    def test_custom_id_project_migration_preserves_bytes_titles_and_scope(self):
+        old_state = {"active": True, "max_columns": 2, "row_counts": [2, 1],
+                     "panels": [{"id": "general", "title": "General"},
+                                {"id": "gps", "title": "Receiver"},
+                                {"id": "can", "title": "CAN"}], "scope": ["gps"]}
+        events = [{"type": "data", "dir": "rx", "data": b"@PANEL:gps|OK\n",
+                   "panel_id": "gps", "panel_payload": "OK"}]
+        data = project.collect_project_data(project_name="Legacy panels", settings={},
+                                            events=events, panel_view=old_state)
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'legacy.msproj'
+            project.save_project(path, data)
+            loaded = project.load_project(path)
+            self.assertEqual(loaded['panel_view']['scope'], ['12'])
+            self.assertEqual(loaded['panel_view']['panels'][1], {'id': '12', 'title': 'Receiver'})
+            self.assertEqual(loaded['events'][0]['panel_id'], '12')
+            self.assertEqual(loaded['events'][0]['original_panel_id'], 'gps')
+            self.assertEqual(loaded['events'][0]['data'], events[0]['data'])
+            project.save_project(path, project.collect_project_data(
+                project_name='Migrated', settings={}, events=loaded['events'], panel_view=loaded['panel_view']))
+            self.assertEqual(project.load_project(path)['events'], loaded['events'])
+        self.assertEqual(events[0]['panel_id'], 'gps')
+        self.assertEqual(old_state['panels'][1]['id'], 'gps')

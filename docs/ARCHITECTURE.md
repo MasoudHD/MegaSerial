@@ -91,7 +91,7 @@ SerialWorker → MainWindow.on_data_received → RxMonitor (unchanged raw bytes)
 
 `panel_protocol.py` parses complete strict UTF-8 lines without Qt and provides a
 nonmutating presentation projection. `panel_model.py` owns project layout,
-validation, destination fallback, titles and search scope without Qt or event
+validation, automatic row/column IDs, destination fallback, titles and search scope without Qt or event
 storage. `panel_view.py` owns the configuration dialog, scope menu and layout of
 compact reusable monitor widgets. `MainWindow` connects these to the existing
 line pipeline, presentation switch, global options and project/export actions.
@@ -102,3 +102,8 @@ original serial bytes before interpretation.
 format version 1. It is deliberately separate from global config. `monitor.py`
 provides optional panel columns in its existing CSV exporter; normal CSV stays
 compatible. See [Panel View](panel-view.md) for schema, protocol and limitations.
+
+Panel workspace schema version 2 uses position IDs such as `32`. The pure
+`migrate_panel_project` helper upgrades earlier custom-ID workspace metadata,
+search scope and event routing during project load, preserving raw event bytes
+and recording changed IDs in `original_panel_id`. No additional event store is used.

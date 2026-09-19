@@ -12,7 +12,7 @@ class PanelExportTests(unittest.TestCase):
         message = 'سلام, "GPS"\nnext line'
         events = [
             {'type': 'data', 'dir': 'rx', 'ts': datetime(2026, 1, 1),
-             'data': b'raw', 'panel_payload': message, 'panel_id': 'gps'},
+             'data': b'raw', 'panel_payload': message, 'panel_id': '12'},
             {'type': 'data', 'dir': 'tx', 'data': b'AT'},
             {'type': 'log', 'msg': message},
             {'type': 'data', 'dir': 'rx', 'data': b'unknown', 'panel_id': 'sensor7'},
@@ -20,14 +20,14 @@ class PanelExportTests(unittest.TestCase):
         before = deepcopy(events)
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / 'panels.csv'
-            self.assertEqual(write_events_csv(path, events, {'gps': 'گیرنده, "GPS"\nTitle'}), 4)
+            self.assertEqual(write_events_csv(path, events, {'12': 'گیرنده, "GPS"\nTitle'}), 4)
             with path.open(encoding=CSV_ENCODING, newline='') as fh:
                 rows = list(csv.DictReader(fh))
-        self.assertEqual(rows[0]['panel_id'], 'gps')
+        self.assertEqual(rows[0]['panel_id'], '12')
         self.assertEqual(rows[0]['panel_title'], 'گیرنده, "GPS"\nTitle')
         self.assertEqual(rows[0]['text'], message.replace('\n', '\\n'))
         self.assertEqual(rows[0]['data'], '72 61 77')
-        self.assertEqual(rows[1]['panel_id'], 'general')
+        self.assertEqual(rows[1]['panel_id'], '11')
         self.assertEqual(rows[1]['panel_title'], 'General')
         self.assertEqual(rows[1]['direction'], 'tx')
         self.assertEqual(rows[2]['message'], message)

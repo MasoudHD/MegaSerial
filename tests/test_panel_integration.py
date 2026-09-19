@@ -35,20 +35,20 @@ class PanelIntegrationTests(unittest.TestCase):
         w.on_data_received(b'@PAN')
         w._flush_rx_buffer()
         self.assertEqual(len(w.events), 0)
-        w.on_data_received(b'EL:gps|Fix|OK\r\n@PANEL_TITLE:gps|Receiver\n')
+        w.on_data_received(b'EL:12|Fix|OK\r\n@PANEL_TITLE:12|Receiver\n')
         w.on_data_received(b'@PANEL:unknown|Missing\nordinary\n')
         w._append_data('tx', b'AT')
-        self.assertIn('Fix|OK', self.text('gps'))
-        self.assertNotIn('@PANEL:', self.text('gps'))
-        self.assertEqual(w.panel_view.widgets['gps'].header.text(), 'Receiver')
-        self.assertIn('Missing', self.text('general'))
-        self.assertIn('ordinary', self.text('general'))
-        self.assertIn('AT', self.text('general'))
+        self.assertIn('Fix|OK', self.text('12'))
+        self.assertNotIn('@PANEL:', self.text('12'))
+        self.assertEqual(w.panel_view.widgets['12'].header.text(), '12 — Receiver')
+        self.assertIn('Missing', self.text('11'))
+        self.assertIn('ordinary', self.text('11'))
+        self.assertIn('AT', self.text('11'))
         self.assertEqual(w.events[2]['panel_id'], 'unknown')
-        self.assertEqual(w.events[0]['data'], b'@PANEL:gps|Fix|OK\r\n')
+        self.assertEqual(w.events[0]['data'], b'@PANEL:12|Fix|OK\r\n')
         before = list(w.events)
         w.presentation_combo.setCurrentIndex(0)
-        self.assertIn('@PANEL:gps|Fix|OK', w.view1.plain_text())
+        self.assertIn('@PANEL:12|Fix|OK', w.view1.plain_text())
         w.presentation_combo.setCurrentIndex(1)
         self.assertEqual(list(w.events), before)
 
@@ -56,29 +56,29 @@ class PanelIntegrationTests(unittest.TestCase):
         w = self.window
         w.on_data_received(b'ordinary partial')
         w._flush_rx_buffer()
-        w.on_data_received(b'@PANEL:gps|not at line start\n@PANEL:gps|\x00\n')
+        w.on_data_received(b'@PANEL:12|not at line start\n@PANEL:12|\x00\n')
         self.assertTrue(all('panel_id' not in e for e in w.events))
         w.linemode_check.setChecked(False)
-        w.on_data_received(b'@PANEL:gps|raw\n')
+        w.on_data_received(b'@PANEL:12|raw\n')
         self.assertNotIn('panel_id', w.events[-1])
 
     def test_search_scope_and_shared_zoom(self):
         w = self.window
-        w.on_data_received(b'@PANEL:gps|OK\n@PANEL:can|OK\nplain\n@PANEL:gps|ERROR\n')
+        w.on_data_received(b'@PANEL:12|OK\n@PANEL:21|OK\nplain\n@PANEL:12|ERROR\n')
         original = deepcopy(list(w.events))
-        w.panel_view.workspace.scope = ['gps']
+        w.panel_view.workspace.scope = ['12']
         w.filter_pattern.setText('ERROR')
         w.filter_check.setChecked(True)
-        self.assertNotIn('OK', self.text('gps'))
-        self.assertIn('ERROR', self.text('gps'))
-        self.assertIn('OK', self.text('can'))
-        self.assertIn('plain', self.text('general'))
+        self.assertNotIn('OK', self.text('12'))
+        self.assertIn('ERROR', self.text('12'))
+        self.assertIn('OK', self.text('21'))
+        self.assertIn('plain', self.text('11'))
         w.panel_view.workspace.scope = None
         w._rerender_all()
-        self.assertEqual(self.text('can'), '')
-        self.assertEqual(self.text('general'), '')
+        self.assertEqual(self.text('21'), '')
+        self.assertEqual(self.text('11'), '')
         w.zoom_monitor(2)
-        self.assertEqual(w.panel_view.widgets['gps'].monitor.font_point_size, w.view1.font_point_size)
+        self.assertEqual(w.panel_view.widgets['12'].monitor.font_point_size, w.view1.font_point_size)
         self.assertEqual(list(w.events), original)
 
     def test_layout_dialog_and_title_menu(self):
@@ -99,11 +99,11 @@ class PanelIntegrationTests(unittest.TestCase):
         from collections import deque
         w = self.window
         w.events = deque(maxlen=2)
-        w.on_data_received(b'@PANEL:gps|first\n@PANEL:gps|second\n@PANEL:can|third\n')
-        self.assertNotIn('first', self.text('gps'))
-        self.assertIn('second', self.text('gps'))
+        w.on_data_received(b'@PANEL:12|first\n@PANEL:12|second\n@PANEL:21|third\n')
+        self.assertNotIn('first', self.text('12'))
+        self.assertIn('second', self.text('12'))
         w.clear_monitor()
-        self.assertEqual(self.text('gps'), '')
+        self.assertEqual(self.text('12'), '')
         self.assertEqual(len(w.events), 0)
 
     def test_project_window_roundtrip_and_legacy_reset(self):
@@ -111,8 +111,8 @@ class PanelIntegrationTests(unittest.TestCase):
         from pathlib import Path
         from MegaSerial import project
         w = self.window
-        w.panel_view.workspace.scope = ['gps']
-        w.on_data_received('@PANEL_TITLE:gps|گیرنده\n@PANEL:gps|موقع\n'.encode())
+        w.panel_view.workspace.scope = ['12']
+        w.on_data_received('@PANEL_TITLE:12|گیرنده\n@PANEL:12|موقع\n'.encode())
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / 'panel.msproj'
             with patch('MegaSerial.main_window.QFileDialog.getSaveFileName', return_value=(str(path), '')):
@@ -125,7 +125,7 @@ class PanelIntegrationTests(unittest.TestCase):
             self.assertTrue(w.open_project(str(path)))
             self.assertEqual(w.presentation_combo.currentIndex(), 1)
             self.assertEqual(w.panel_view.workspace.to_dict(), state)
-            self.assertIn('موقع', self.text('gps'))
+            self.assertIn('موقع', self.text('12'))
             legacy = Path(folder) / 'legacy.msproj'
             project.save_project(legacy, project.collect_project_data(
                 project_name='Old', settings={}, events=[{'type': 'data', 'dir': 'rx',
@@ -134,34 +134,34 @@ class PanelIntegrationTests(unittest.TestCase):
             self.assertEqual(w.presentation_combo.currentIndex(), 0)
             self.assertEqual(w.panel_view.workspace.row_counts, [1])
             w.presentation_combo.setCurrentIndex(1)
-            self.assertIn('legacy', self.text('general'))
+            self.assertIn('legacy', self.text('11'))
 
     def test_global_display_options_theme_and_independent_scrollbars(self):
         w = self.window
-        w.on_data_received(b'@PANEL:gps|first\n@PANEL:can|second\n@PANEL:gps|third\n')
+        w.on_data_received(b'@PANEL:12|first\n@PANEL:21|second\n@PANEL:12|third\n')
         w.ts_check.setChecked(False)
         w.delay_check.setChecked(True)
-        self.assertIn(' ms', self.text('gps'))
+        self.assertIn(' ms', self.text('12'))
         w.delay_check.setChecked(False)
-        self.assertNotIn(' ms', self.text('gps'))
+        self.assertNotIn(' ms', self.text('12'))
         w.ts_check.setChecked(True)
-        self.assertIn(w.events[0]['ts'].strftime('%H:%M:%S'), self.text('gps'))
-        self.assertIsNot(w.panel_view.widgets['gps'].monitor.edit.verticalScrollBar(),
-                         w.panel_view.widgets['can'].monitor.edit.verticalScrollBar())
+        self.assertIn(w.events[0]['ts'].strftime('%H:%M:%S'), self.text('12'))
+        self.assertIsNot(w.panel_view.widgets['12'].monitor.edit.verticalScrollBar(),
+                         w.panel_view.widgets['21'].monitor.edit.verticalScrollBar())
         font_size = w.zoom_monitor(1)
         w._apply_theme('light')
-        self.assertEqual(w.panel_view.widgets['gps'].monitor.font_point_size, font_size)
-        self.assertIn('first', self.text('gps'))
+        self.assertEqual(w.panel_view.widgets['12'].monitor.font_point_size, font_size)
+        self.assertIn('first', self.text('12'))
 
     def test_rapid_rx_and_multiline_retention(self):
         from collections import deque
         w = self.window
         w.events = deque(maxlen=30)
-        w.on_data_received(b''.join(f'@PANEL:{"gps" if i % 2 else "can"}|value={i}\n'.encode()
+        w.on_data_received(b''.join(f'@PANEL:{"12" if i % 2 else "21"}|value={i}\n'.encode()
                                    for i in range(300)))
         self.assertEqual(len(w.events), 30)
-        self.assertNotIn('value=269', self.text('gps'))
-        self.assertIn('value=299', self.text('gps'))
+        self.assertNotIn('value=269', self.text('12'))
+        self.assertIn('value=299', self.text('12'))
         self.assertEqual(len(w.panel_view.rendered_blocks), 30)
         before = {ident: widget.monitor.plain_text() for ident, widget in w.panel_view.widgets.items()}
         w._rerender_all()
@@ -172,8 +172,8 @@ class PanelIntegrationTests(unittest.TestCase):
         w._append_data('tx', b'one\ntwo\nthree')
         w._append_data('tx', b'keep')
         w._append_data('tx', b'last')
-        self.assertNotIn('three', self.text('general'))
-        self.assertIn('keep', self.text('general'))
+        self.assertNotIn('three', self.text('11'))
+        self.assertIn('keep', self.text('11'))
 
     def test_panel_csv_uses_scoped_selection_and_normal_header_unchanged(self):
         import csv
@@ -181,8 +181,8 @@ class PanelIntegrationTests(unittest.TestCase):
         from pathlib import Path
         from MegaSerial.monitor import CSV_ENCODING, CSV_COLUMNS
         w = self.window
-        w.on_data_received(b'@PANEL:gps|OK\n@PANEL:can|OK\n@PANEL:gps|ERROR\n')
-        w.panel_view.workspace.scope = ['gps']
+        w.on_data_received(b'@PANEL:12|OK\n@PANEL:21|OK\n@PANEL:12|ERROR\n')
+        w.panel_view.workspace.scope = ['12']
         w.filter_pattern.setText('ERROR')
         w.filter_check.setChecked(True)
         with tempfile.TemporaryDirectory() as folder:
@@ -191,8 +191,43 @@ class PanelIntegrationTests(unittest.TestCase):
                 w.export_log_csv()
                 with path.open(encoding=CSV_ENCODING) as fh:
                     rows = list(csv.DictReader(fh))
-                self.assertEqual([r['panel_id'] for r in rows], ['can', 'gps'])
+                self.assertEqual([r['panel_id'] for r in rows], ['21', '12'])
                 w.presentation_combo.setCurrentIndex(0)
                 w.export_log_csv()
                 with path.open(encoding=CSV_ENCODING) as fh:
                     self.assertEqual(next(csv.reader(fh)), CSV_COLUMNS)
+
+    def test_created_cells_receive_position_ids_without_title_setup(self):
+        from MegaSerial.panel_model import PanelWorkspace
+        from PyQt6.QtCore import Qt
+        w = self.window
+        initial = PanelWorkspace()
+        initial.active = True
+        dialog = PanelLayoutDialog(initial)
+        self.addCleanup(dialog.deleteLater)
+        dialog.columns.setValue(3)
+        dialog.rows.setValue(3)
+        for row, count in enumerate([3, 1, 2]):
+            dialog.counts.cellWidget(row, 0).setValue(count)
+        self.assertEqual(dialog.table.item(5, 1).text(), '32')
+        self.assertFalse(dialog.table.item(5, 1).flags() & Qt.ItemFlag.ItemIsEditable)
+        # A message received before creating its cell is replayed into that cell.
+        w.on_data_received(b'@PANEL:32|before creation\n')
+        dialog.accept()
+        w.panel_view.set_workspace(dialog.result_workspace)
+        w.on_data_received(b'@PANEL:11|first cell\n@PANEL:32|after creation\n')
+        self.assertIn('before creation', self.text('32'))
+        self.assertIn('after creation', self.text('32'))
+        self.assertIn('first cell', self.text('11'))
+        self.assertEqual(w.panel_view.widgets['32'].header.text(), '32 — Panel 32')
+        w.on_data_received(b'@PANEL_TITLE:32|GPS Receiver\n@PANEL:32|after title\n')
+        self.assertEqual(w.panel_view.widgets['32'].header.text(), '32 — GPS Receiver')
+        self.assertIn('after title', self.text('32'))
+        # Editing row 1 must not move row 3's title or routing.
+        updated = PanelLayoutDialog(w.panel_view.workspace)
+        self.addCleanup(updated.deleteLater)
+        updated.counts.cellWidget(0, 0).setValue(1)
+        updated.accept()
+        w.panel_view.set_workspace(updated.result_workspace)
+        self.assertEqual(w.panel_view.widgets['32'].header.text(), '32 — GPS Receiver')
+        self.assertIn('after creation', self.text('32'))

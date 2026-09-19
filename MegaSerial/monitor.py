@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import (
 
 from . import utils
 from .panel_protocol import panel_event
+from .panel_model import GENERAL
 
 DISPLAY_FORMATS = ["ASCII", "HEX", "Binary", "Hexdump"]
 BYTES_PER_ROW = ["8", "16", "32", "64"]
@@ -145,9 +146,9 @@ def events_to_csv_rows(events, panel_titles: dict | None = None) -> list[list]:
     for index, ev in enumerate(events, start=1):
         row = event_csv_row(ev, index, prev_ts)
         if panel_titles is not None:
-            ident = ev.get("panel_id") or "general"
+            ident = ev.get("panel_id") or GENERAL
             row[CSV_COLUMNS.index("text")] = _csv_text(panel_event(ev))
-            row.extend([ident, panel_titles.get(ident, "General" if ident == "general" else "")])
+            row.extend([ident, panel_titles.get(ident, "General" if ident == GENERAL else "")])
         rows.append(row)
         if isinstance(ev.get("ts"), datetime):
             prev_ts = ev["ts"]

@@ -2,22 +2,28 @@
 
 Choose **Panel View** above the shared filter to replace the normal monitor with
 independent log panels. **Configure panels…** edits rows, maximum columns, each
-row's panel count, and the IDs/titles in row-major order. Every row shares its
-width equally among its panels. Layouts support 1–8 rows and 1–8 columns. General
-occupies the first cell, so a 1×1 layout contains General only. General's ID
-`general` and title are reserved. Other titles can be edited in this dialog.
-Changing an ID changes future routing; it does not rename historical events.
+row's panel count and optional titles. IDs are generated automatically from the
+one-based row and column: `11` is row 1, column 1; `32` is row 3, column 2.
+IDs are read-only and always visible in panel headers. Create the layout and send
+data immediately; titles and title commands are not required. Blank titles use
+`Panel <ID>`. General occupies the first cell (`11`) and also accepts routed data.
+Its title defaults to General and may be edited without affecting fallback routing.
+Every row shares its width equally among its panels. Layouts support 1–8 rows
+and 1–8 columns. Changing row lengths preserves titles and data by position ID,
+not by flattened panel order. Removed positions fall back to cell 11; restoring
+a position displays its retained events again.
 
 Enable **Line mode** for routing. Send strict UTF-8 lines terminated by LF or CRLF:
 
 ```text
-@PANEL:gps|GPS Fix acquired
-@PANEL:gps|Latitude=32.654|Longitude=51.668
-@PANEL_TITLE:gps|GPS Receiver
+@PANEL:32|GPS Fix acquired
+@PANEL:32|Latitude=32.654|Longitude=51.668
+@PANEL_TITLE:32|GPS Receiver
 ```
 
-IDs are case-sensitive, nonempty printable strings without whitespace or `|`.
-Unicode IDs, payloads and titles are supported. The first `|` separates the ID
+Configured IDs are numeric strings derived from matrix positions. The parser
+still accepts other string IDs, which fall back to General. Unicode payloads
+and titles are supported. The first `|` separates the ID
 from the payload; subsequent pipes and empty payloads are preserved. Invalid
 UTF-8, control bytes (except tabs), malformed commands, and incomplete lines are
 never interpreted as commands. Raw mode does not interpret the protocol. As with
@@ -51,7 +57,7 @@ are shared. The **Panels** menu selects which panels the filter applies to:
 
 Invalid regexes use the normal monitor's behavior (no matching events), only
 within the selected scope. The fallback panel determines the scope for unknown
-IDs. Renaming titles preserves scope; removing/changing IDs removes those IDs
+IDs. Renaming titles preserves scope; removing positions removes those IDs
 from an explicit scope. Search never changes session events.
 
 Timestamps, delays, direction, line numbers, autoscroll, theme and Ctrl +/- or
@@ -63,10 +69,16 @@ Graphing and sequence response matching continue to receive their existing data.
 ## Projects and export
 
 `.msproj` version 1 gains an optional top-level `panel_view` object:
-`active`, `rows`, `max_columns`, `row_counts`, row-major `panels` (`id`, `title`),
+`schema_version: 2`, `active`, `rows`, `max_columns`, `row_counts`, row-major
+`panels` (`id`, `title`),
 and `scope` (`null` means All). This is project state, not application config.
 Missing or invalid panel configuration restores an inactive 1×1 General view.
-Old events remain valid and appear in General; no format migration is needed.
+Old events without routing remain valid and appear in General. Earlier Panel View
+projects with custom IDs are migrated by matrix position on load: titles and
+search scope are preserved, configured event IDs are mapped to position IDs, and
+`original_panel_id` retains the old ID. Raw serial bytes are unchanged. Saving
+writes panel schema version 2; the overall project format remains version 1.
+Devices should use the new position IDs after migration.
 
 The existing shared event deque remains the only event store (6,000 entries).
 Parsed RX events retain original `data` bytes and gain `panel_id` plus either
@@ -80,7 +92,7 @@ In Panel View, **Export CSV** uses the existing exporter and adds `panel_id` and
 type and semantic RX/TX columns are preserved. CSV elapsed time remains relative
 to the previous exported event. Unknown IDs retain their ID with an empty title.
 Panel titles are the current configured titles at export time. General exports
-as `general` / `General`. Unicode, quoting and newline escaping follow the normal
+as `11` / its current title. Unicode, quoting and newline escaping follow the normal
 CSV exporter. Normal Monitor CSV retains its original columns and content.
 **Save log** in Panel View writes the shown plain text grouped under panel headers.
 Both exports respect scoped filtering.

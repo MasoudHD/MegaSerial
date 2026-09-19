@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (
     QTableWidgetItem, QHeaderView, QMessageBox, QScrollArea, QSizePolicy,
 )
 from .monitor import MonitorView
-from .panel_model import PanelWorkspace, GENERAL, MAX_ROWS, MAX_COLUMNS
+from .panel_model import PanelWorkspace, MAX_ROWS, MAX_COLUMNS, default_title
 from .panel_protocol import panel_event
 
 
@@ -32,10 +32,10 @@ class PanelLayoutDialog(QDialog):
         self.counts.setHorizontalHeaderLabels(["Panels in row"])
         box.addWidget(self.counts)
         self.table = QTableWidget(0, 3)
-        self.table.setHorizontalHeaderLabels(["Position", "Panel ID", "Title"])
+        self.table.setHorizontalHeaderLabels(["Position", "Panel ID", "Title (optional)"])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         box.addWidget(self.table, 1)
-        box.addWidget(QLabel("General is permanent. Changing an ID leaves historical events under their original ID."))
+        box.addWidget(QLabel("IDs are automatic: row 3, column 2 is 32. Titles are optional. General uses cell 11."))
         self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)
@@ -59,21 +59,17 @@ class PanelLayoutDialog(QDialog):
     def _panels_changed(self):
         old = [{"id": self.table.item(i, 1).text(), "title": self.table.item(i, 2).text()}
                for i in range(self.table.rowCount())]
-        panels = old or self.workspace.panels
+        titles = {p["id"]: p["title"] for p in (old or self.workspace.panels)}
         counts = [self.counts.cellWidget(i, 0).value() for i in range(self.counts.rowCount())]
         self.table.setRowCount(sum(counts))
         idx = 0
-        used = {p["id"] for p in panels}
         for row, count in enumerate(counts):
             for col in range(count):
-                ident = f"panel{idx + 1}"
-                while ident in used:
-                    ident += "_"
-                p = panels[idx] if idx < len(panels) else {"id": ident, "title": ident}
-                used.add(p["id"])
-                for column, text in enumerate((f"{row + 1} / {col + 1}", p["id"], p["title"])):
+                ident = f"{row + 1}{col + 1}"
+                title = titles.get(ident, default_title(ident))
+                for column, text in enumerate((f"{row + 1} / {col + 1}", ident, title)):
                     item = QTableWidgetItem(text)
-                    if column == 0 or idx == 0:
+                    if column < 2:
                         item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
                     self.table.setItem(idx, column, item)
                 idx += 1
@@ -167,7 +163,7 @@ class PanelView(QScrollArea):
         all_action.setChecked(self.workspace.scope is None)
         all_action.triggered.connect(self._all_scope)
         for ident, title in self.workspace.titles().items():
-            self.widgets[ident].header.setText(title)
+            self.widgets[ident].header.setText(f"{ident} — {title}")
             self.widgets[ident].header.setToolTip(f"{title}\nID: {ident}")
             action = self.scope_menu.addAction(f"{title} ({ident})")
             action.setCheckable(True)
