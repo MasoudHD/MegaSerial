@@ -874,7 +874,7 @@ class MainWindow(QMainWindow):
         self._rerender_all()
 
     def _panel_filtered_events(self):
-        return (panel_event(ev) for ev in self.events
+        return (ev for ev in self.events
                 if self.panel_view.workspace.accepts(panel_event(ev), self._event_passes_filter))
 
     def _active_views(self) -> list:
@@ -1071,7 +1071,11 @@ class MainWindow(QMainWindow):
         if not path.lower().endswith(".csv"):
             path += ".csv"
         try:
-            count = write_events_csv(path, self._filtered_events())
+            if self.panel_view.workspace.active:
+                count = write_events_csv(path, self._panel_filtered_events(),
+                                         self.panel_view.workspace.titles())
+            else:
+                count = write_events_csv(path, self._filtered_events())
             self.status.showMessage(f"Exported {count} log entries to {path}", 5000)
         except OSError as exc:
             QMessageBox.warning(self, "Export failed", str(exc))
@@ -1644,6 +1648,7 @@ class MainWindow(QMainWindow):
             project_name=self.project_name_edit.text().strip(),
             settings=self._collect_settings(),
             events=list(self.events),
+            panel_view=self.panel_view.workspace.to_dict(),
         )
         try:
             project_io.save_project(path, data)
@@ -1677,6 +1682,11 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Import failed", "Project settings are invalid.")
             return False
 
+        self._rx_flush_timer.stop()
+        self._rx_buf.clear()
+        self._rx_line_start = True
+        self.panel_view.set_workspace(PanelWorkspace.restore(loaded.get("panel_view")))
+        self.presentation_combo.setCurrentIndex(int(self.panel_view.workspace.active))
         self.cfg.update(settings)
         self.shortcuts = list(self.cfg.get("shortcuts", []))
         self.steps = [Step.from_dict(d) for d in self.cfg.get("sequence", [])]

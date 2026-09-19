@@ -37,9 +37,11 @@ def collect_project_data(
     project_name: str,
     settings: dict,
     events: list[dict],
+    panel_view: dict | None = None,
 ) -> dict:
     """Build a serializable project document from live app state."""
     return {
+        **({"panel_view": panel_view} if panel_view is not None else {}),
         "format_version": FORMAT_VERSION,
         "project_name": project_name,
         "settings": settings,
@@ -68,6 +70,7 @@ def load_project(path: str | Path) -> dict:
     events = [_event_from_dict(ev) for ev in raw.get("events", []) if isinstance(ev, dict)]
 
     return {
+        "panel_view": raw.get("panel_view"),
         "project_name": raw.get("project_name", "") or "",
         "settings": settings,
         "events": events,
