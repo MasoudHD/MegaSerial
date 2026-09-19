@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import (
     QGroupBox, QLabel, QComboBox, QPushButton, QCheckBox, QLineEdit,
     QSplitter, QTabWidget, QListWidget, QListWidgetItem, QTableWidget,
     QTableWidgetItem, QHeaderView, QProgressBar, QSpinBox, QFileDialog,
-    QMessageBox, QAbstractItemView, QSizePolicy,
+    QMessageBox, QAbstractItemView, QSizePolicy, QStackedWidget,
 )
 
 from . import config, theme, utils, sound, __app_name__, __version__
@@ -32,6 +32,9 @@ from .monitor import (
     MonitorView, compile_filter, event_matches_filter, clamp_font_point_size,
     write_events_csv, DEFAULT_FONT_POINT_SIZE,
 )
+from .panel_protocol import PanelProtocolParser, panel_event
+from .panel_model import PanelWorkspace
+from .panel_view import PanelView
 from .graph_panel import GraphPanel
 from .icons import app_logo_pixmap
 from . import project as project_io
@@ -86,6 +89,8 @@ class MainWindow(QMainWindow):
             self.cfg.get("monitor_font_point_size", DEFAULT_FONT_POINT_SIZE))
         # RX line-assembly (line mode)
         self._rx_buf = bytearray()
+        self._rx_line_start = True
+        self._panel_parser = PanelProtocolParser()
         self._rx_flush_timer = QTimer(self)
         self._rx_flush_timer.setSingleShot(True)
         self._rx_flush_timer.timeout.connect(self._flush_rx_buffer)
@@ -347,6 +352,16 @@ class MainWindow(QMainWindow):
         tb.addWidget(self.save_csv_btn)
         v.addLayout(tb)
 
+        mode_row = QHBoxLayout()
+        self.presentation_combo = QComboBox()
+        self.presentation_combo.addItems(["Normal Monitor View", "Panel View"])
+        self.presentation_combo.currentIndexChanged.connect(self._on_presentation_changed)
+        mode_row.addWidget(self.presentation_combo)
+        self.panel_config_btn = QPushButton("Configure panels…")
+        mode_row.addWidget(self.panel_config_btn)
+        mode_row.addStretch(1)
+        v.addLayout(mode_row)
+
         # regex filter row
         fb = QHBoxLayout()
         self.filter_check = QCheckBox("Filter")
@@ -366,6 +381,11 @@ class MainWindow(QMainWindow):
         self.filter_dir_combo.currentIndexChanged.connect(self._on_filter_changed)
         fb.addWidget(self.filter_check)
         fb.addWidget(self.filter_pattern, 1)
+        self.panel_view = PanelView(self._monitor_font_pt, self.zoom_monitor)
+        self.panel_view.changed.connect(self._rerender_all)
+        self.panel_config_btn.clicked.connect(self.panel_view.configure)
+        fb.addWidget(self.panel_view.scope_button)
+        self.panel_view.scope_button.hide()
         fb.addWidget(self.filter_dir_combo)
         fb.addWidget(self.filter_ci_check)
         fb.addWidget(self.filter_status)
@@ -390,7 +410,10 @@ class MainWindow(QMainWindow):
         self._install_zoom_shortcuts()
         self.graph_panel = GraphPanel()
         self.graph_panel.mode_combo.currentIndexChanged.connect(self._on_graph_settings_changed)
-        self.center_splitter.addWidget(self.view_splitter)
+        self.presentation_stack = QStackedWidget()
+        self.presentation_stack.addWidget(self.view_splitter)
+        self.presentation_stack.addWidget(self.panel_view)
+        self.center_splitter.addWidget(self.presentation_stack)
         self.center_splitter.addWidget(self.graph_panel)
         self.center_splitter.setStretchFactor(0, 3)
         self.center_splitter.setStretchFactor(1, 2)
@@ -843,6 +866,17 @@ class MainWindow(QMainWindow):
             "colors": self.colors,
         }
 
+    def _on_presentation_changed(self, index):
+        self.panel_view.workspace.active = index == 1
+        self.presentation_stack.setCurrentIndex(index)
+        self.panel_view.scope_button.setVisible(index == 1)
+        self.split_check.setEnabled(index == 0)
+        self._rerender_all()
+
+    def _panel_filtered_events(self):
+        return (panel_event(ev) for ev in self.events
+                if self.panel_view.workspace.accepts(panel_event(ev), self._event_passes_filter))
+
     def _active_views(self) -> list:
         return self.views if self.split_check.isChecked() else [self.view1]
 
@@ -859,7 +893,7 @@ class MainWindow(QMainWindow):
         return self._monitor_font_pt
 
     def _apply_monitor_zoom(self) -> None:
-        for view in self.views:
+        for view in [*self.views, self.panel_view]:
             view.set_font_point_size(self._monitor_font_pt)
 
     def _compile_filter(self) -> None:
@@ -909,11 +943,17 @@ class MainWindow(QMainWindow):
     def _emit_event(self, ev: dict) -> None:
         visible = list(self._filtered_events())
         prev_ts = visible[-1]["ts"] if visible else None
+        evicted = len(self.events) == self.events.maxlen
         self.events.append(ev)
         opts = self._global_opts()
         if self._event_passes_filter(ev):
             for view in self._active_views():
                 view.append_event(ev, opts, prev_ts)
+        if self.panel_view.workspace.active:
+            if evicted:
+                self.panel_view.rerender(self.events, opts, self._event_passes_filter)
+            else:
+                self.panel_view.append_event(ev, opts, self._event_passes_filter)
         if self.graph_view_check.isChecked():
             self.graph_panel.feed_event(ev)
 
@@ -934,28 +974,50 @@ class MainWindow(QMainWindow):
             line = bytes(self._rx_buf[:idx + 1])
             del self._rx_buf[:idx + 1]
             if line.strip(b"\r\n"):
-                self._append_data("rx", line)
+                self._append_data("rx", line, complete_line=self._rx_line_start)
+            self._rx_line_start = True
+        if len(self._rx_buf) > 65536:
+            self._flush_rx_buffer(force=True)
         if self._rx_buf:
             self._rx_flush_timer.start(150)
         else:
             self._rx_flush_timer.stop()
 
-    def _flush_rx_buffer(self) -> None:
+    def _flush_rx_buffer(self, force=False) -> None:
         """Emit any buffered partial line (called on timeout or mode change)."""
         if not self._rx_buf:
             return
         line = bytes(self._rx_buf)
+        # A potential protocol line may span arbitrarily slow serial reads.
+        # Keep it until LF, with a 64 KiB cap; never parse timeout fragments.
+        if not force and self._rx_line_start and len(line) <= 65536 and any(
+                prefix.startswith(line) or line.startswith(prefix)
+                for prefix in (b"@PANEL:", b"@PANEL_TITLE:")):
+            return
         self._rx_buf.clear()
+        self._rx_line_start = False
         if line.strip(b"\r\n"):
             self._append_data("rx", line)
 
     def _on_linemode_toggled(self, on: bool) -> None:
-        self._flush_rx_buffer()
+        self._flush_rx_buffer(force=True)
+        self._rx_line_start = True
         if not on:
             self._rx_flush_timer.stop()
 
-    def _append_data(self, direction: str, data: bytes) -> None:
-        self._emit_event({"type": "data", "dir": direction, "ts": datetime.now(), "data": data})
+    def _append_data(self, direction: str, data: bytes, *, complete_line=False) -> None:
+        ev = {"type": "data", "dir": direction, "ts": datetime.now(), "data": data}
+        if direction == "rx" and complete_line:
+            command = self._panel_parser.parse(data)
+            if command.kind != "normal":
+                ev["panel_id"] = command.panel_id
+                if command.kind == "data":
+                    ev["panel_payload"] = command.text
+                else:
+                    ev["panel_title"] = command.text
+                    if self.panel_view.workspace.update_title(command.panel_id, command.text):
+                        self.panel_view.refresh_titles()
+        self._emit_event(ev)
 
     def _log_line(self, kind: str, message: str) -> None:
         self._emit_event({"type": "log", "kind": kind, "ts": datetime.now(), "msg": message})
@@ -967,6 +1029,8 @@ class MainWindow(QMainWindow):
         opts = self._global_opts()
         for view in self._active_views():
             view.rerender(self._filtered_events(), opts)
+        if self.panel_view.workspace.active:
+            self.panel_view.rerender(self.events, opts, self._event_passes_filter)
 
     def _on_split_toggled(self, checked: bool) -> None:
         self.view2.setVisible(checked)
@@ -978,6 +1042,10 @@ class MainWindow(QMainWindow):
 
     def clear_monitor(self) -> None:
         self.events.clear()
+        self._rx_buf.clear()
+        self._rx_line_start = True
+        self._rx_flush_timer.stop()
+        self.panel_view.clear()
         for view in self.views:
             view.clear()
         self.graph_panel.clear()
@@ -989,7 +1057,8 @@ class MainWindow(QMainWindow):
             return
         try:
             with open(path, "w", encoding="utf-8") as fh:
-                fh.write(self.view1.plain_text())
+                fh.write(self.panel_view.plain_text() if self.panel_view.workspace.active
+                         else self.view1.plain_text())
             self.status.showMessage(f"Log saved to {path}", 5000)
         except OSError as exc:
             QMessageBox.warning(self, "Save failed", str(exc))
