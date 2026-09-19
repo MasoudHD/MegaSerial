@@ -1589,16 +1589,24 @@ class MainWindow(QMainWindow):
             "MegaSerial project (*.msproj);;JSON files (*.json);;All files (*)")
         if not path:
             return
+        self.open_project(path)
+
+    def open_project(self, path: str) -> bool:
+        """Load a project file into the window.
+
+        Shared by File > Open and the command line, so both behave identically.
+        Returns True when the project was applied.
+        """
         try:
             loaded = project_io.load_project(path)
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             QMessageBox.warning(self, "Import failed", str(exc))
-            return
+            return False
 
         settings = loaded.get("settings", {})
         if not isinstance(settings, dict):
             QMessageBox.warning(self, "Import failed", "Project settings are invalid.")
-            return
+            return False
 
         self.cfg.update(settings)
         self.shortcuts = list(self.cfg.get("shortcuts", []))
@@ -1624,6 +1632,7 @@ class MainWindow(QMainWindow):
 
         self._set_project_path(path)
         self.status.showMessage(f"Imported project from {path}", 5000)
+        return True
 
     # ---------------------------------------------------------------- close
     def closeEvent(self, event) -> None:

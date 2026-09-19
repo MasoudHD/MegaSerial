@@ -9,6 +9,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 _CONFIG_HOME = tempfile.mkdtemp(prefix="megaserial-test-home-")
@@ -72,6 +73,43 @@ class ActiveProjectTests(unittest.TestCase):
 
         self.window._set_project_path(None)
 
+        self.assertIsNone(self.window._project_path)
+        self.assertEqual(self.window.windowTitle(), BASE_WINDOW_TITLE)
+
+    def test_opening_a_project_sets_the_active_path_and_title(self):
+        path = self._write_project("Modem Bring-up.msproj")
+
+        self.assertTrue(self.window.open_project(str(path)))
+
+        self.assertEqual(self.window._project_path, str(path))
+        self.assertIn("Modem Bring-up.msproj", self.window.windowTitle())
+
+    def test_the_open_dialog_delegates_to_the_shared_open_project_method(self):
+        path = self._write_project("Dialog.msproj")
+        with patch.object(MainWindow, "open_project", return_value=True) as shared, \
+                patch("MegaSerial.main_window.QFileDialog.getOpenFileName",
+                      return_value=(str(path), "")):
+            self.window.import_project()
+
+        shared.assert_called_once_with(str(path))
+
+    def test_a_cancelled_open_dialog_does_not_touch_the_active_project(self):
+        with patch.object(MainWindow, "open_project") as shared, \
+                patch("MegaSerial.main_window.QFileDialog.getOpenFileName",
+                      return_value=("", "")):
+            self.window.import_project()
+
+        shared.assert_not_called()
+        self.assertIsNone(self.window._project_path)
+
+    def test_an_unreadable_project_reports_failure_and_keeps_the_title(self):
+        broken = Path(self.directory) / "broken.msproj"
+        broken.write_text("this is not json", encoding="utf-8")
+
+        with patch("MegaSerial.main_window.QMessageBox.warning") as warned:
+            self.assertFalse(self.window.open_project(str(broken)))
+
+        warned.assert_called_once()
         self.assertIsNone(self.window._project_path)
         self.assertEqual(self.window.windowTitle(), BASE_WINDOW_TITLE)
 

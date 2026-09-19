@@ -67,7 +67,10 @@ plot live numeric data, and automate multi-step command sequences that advance
 - **Live graphing** – plot numeric values parsed from the incoming stream as a
   time series or XY plot, with multiple auto-detected series.
 - **Projects** – save and reload the full workspace (sequences, settings and
-  captured logs) as a single `.msproj` file.
+  captured logs) as a single `.msproj` file. The open project is shown in the
+  window title, and a project can be passed on the command line or opened by
+  double-click on Windows after a one-off
+  [file-association registration](docs/file-association.md).
 - **Full port control** – baud rate, data bits, parity, stop bits, RTS/CTS and
   XON/XOFF flow control, plus manual DTR / RTS toggles.
 - **Auto-reconnect** – if the device drops or re-enumerates (common with cellular
