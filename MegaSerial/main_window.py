@@ -358,6 +358,7 @@ class MainWindow(QMainWindow):
         self.presentation_combo.currentIndexChanged.connect(self._on_presentation_changed)
         mode_row.addWidget(self.presentation_combo)
         self.panel_config_btn = QPushButton("Configure panels…")
+        self.panel_config_btn.hide()
         mode_row.addWidget(self.panel_config_btn)
         mode_row.addStretch(1)
         v.addLayout(mode_row)
@@ -872,6 +873,7 @@ class MainWindow(QMainWindow):
         self.panel_view.workspace.active = index == 1
         self.presentation_stack.setCurrentIndex(index)
         self.panel_view.scope_button.setVisible(index == 1)
+        self.panel_config_btn.setVisible(index == 1)
         self.split_check.setEnabled(index == 0)
         self._rerender_all()
 
