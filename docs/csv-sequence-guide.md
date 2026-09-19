@@ -70,6 +70,14 @@ appends nothing, and an invalid escape such as `\xZZ` fails the step with a
 parse error. Files written before this column existed import unchanged: their
 `line_ending` keeps its fixed meaning.
 
+### Looping is not part of this CSV
+
+A loop repeats a **whole sequence**, so it is a property of the sequence rather
+than of any step. The columns above are unchanged by it: sequence CSV files
+still describe only the step list, and they import and export exactly as before.
+Configure looping in the **Sequence** tab or in the sequence editor instead; it
+is stored in your settings and `.msproj` file.
+
 ### How `advance` uses the other columns
 
 - `time` — send `data`, wait `delay_ms`, then continue. `expect` is ignored.

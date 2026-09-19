@@ -58,7 +58,9 @@ plot live numeric data, and automate multi-step command sequences that advance
   it into the send bar, resend, or save it as a shortcut.
 - **Command sequences** – build a list of steps that run top-to-bottom, each
   advancing *after a delay*, *on an expected response*, or *both*, with retries,
-  failure detection, per-step beep-on-match, and looping. Import/export as CSV.
+  failure detection and per-step beep-on-match. Import/export as CSV.
+- **Sequence looping** – repeat a whole sequence a fixed number of times, until
+  an expected reply arrives (ASCII/HEX/Binary), or forever until you stop it.
 - **Sequence groups** – run several named sequences back to back; tick or untick
   each one to include or skip it in the group run without changing the sequence
   itself.

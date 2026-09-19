@@ -119,8 +119,11 @@ DEFAULTS = {
     "shortcuts": [],                # [{name, data, fmt, line_ending}]
     "history": [],                  # [{ts, text, fmt, line_ending}] manual sends
     "sequence": [],                 # [Step.to_dict(), ...]
+    # Legacy keys, still written so older builds keep their original behavior.
     "sequence_loop": False,
     "sequence_loop_delay_ms": 0,
+    "sequence_loop_config": {"mode": "none", "count": 1, "until_rx": "",
+                             "until_rx_fmt": "ASCII", "delay_ms": 0},
     "sequence_groups": [],          # [{name, steps: [Step.to_dict(), ...]}]
     "group_delay_ms": 0,
     "group_loop": False,

@@ -4,14 +4,17 @@ from __future__ import annotations
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QDialog, QDialogButtonBox, QFormLayout, QLineEdit, QComboBox, QSpinBox,
-    QVBoxLayout, QLabel, QPlainTextEdit, QCheckBox, QTableWidget, QTableWidgetItem,
-    QGridLayout, QHeaderView, QAbstractItemView, QPushButton,
+    QVBoxLayout, QHBoxLayout, QLabel, QPlainTextEdit, QCheckBox, QTableWidget,
+    QTableWidgetItem, QGridLayout, QHeaderView, QAbstractItemView, QPushButton,
+    QWidget,
 )
 
 from . import utils
 from .sequence import (
-    Step, NamedSequence, ADVANCE_MODES, ADVANCE_LABELS, ADVANCE_TIME,
+    Step, NamedSequence, SequenceLoop, ADVANCE_MODES, ADVANCE_LABELS, ADVANCE_TIME,
     ON_TIMEOUT_CONTINUE, ON_TIMEOUT_STOP, ON_TIMEOUT_RETRY,
+    LOOP_MODES, LOOP_LABELS, LOOP_COUNT, LOOP_UNTIL_RX, LOOP_NONE,
+    MIN_LOOP_COUNT, MAX_LOOP_COUNT, MAX_LOOP_DELAY_MS,
 )
 
 _ON_TIMEOUT_LABELS = {
@@ -21,6 +24,77 @@ _ON_TIMEOUT_LABELS = {
 }
 
 _CUSTOM_SUFFIX_HINT = "Suffix bytes, e.g. \\r\\n or \\x00 — used when Line ending is Custom"
+
+
+class SequenceLoopControls(QWidget):
+    """Loop-mode selector shared by the Sequence tab and the sequence editor.
+
+    Only the inputs the selected mode actually uses stay visible, so the row
+    does not grow for the common "no loop" case.
+    """
+
+    def __init__(self, loop: SequenceLoop | None = None, parent=None):
+        super().__init__(parent)
+        row = QHBoxLayout(self)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(6)
+
+        self.mode = QComboBox()
+        for mode in LOOP_MODES:
+            self.mode.addItem(LOOP_LABELS[mode], mode)
+        self.mode.currentIndexChanged.connect(self._sync_visible)
+        row.addWidget(QLabel("Loop"))
+        row.addWidget(self.mode)
+
+        self.count = QSpinBox()
+        self.count.setRange(MIN_LOOP_COUNT, MAX_LOOP_COUNT)
+        self.count.setSuffix(" runs")
+        self.count.setToolTip("Total number of times the whole sequence runs")
+        row.addWidget(self.count)
+
+        self.until_rx_label = QLabel("Until")
+        self.until_rx = QLineEdit()
+        self.until_rx.setPlaceholderText("Reply that ends the loop, e.g. READY")
+        self.until_rx_fmt = QComboBox()
+        self.until_rx_fmt.addItems(utils.FORMATS)
+        row.addWidget(self.until_rx_label)
+        row.addWidget(self.until_rx, 1)
+        row.addWidget(self.until_rx_fmt)
+
+        self.delay_label = QLabel("Delay between")
+        self.delay = QSpinBox()
+        self.delay.setRange(0, MAX_LOOP_DELAY_MS)
+        self.delay.setSuffix(" ms")
+        row.addWidget(self.delay_label)
+        row.addWidget(self.delay)
+
+        self.set_loop(loop or SequenceLoop())
+
+    def _sync_visible(self, *_args) -> None:
+        mode = self.mode.currentData()
+        self.count.setVisible(mode == LOOP_COUNT)
+        for w in (self.until_rx_label, self.until_rx, self.until_rx_fmt):
+            w.setVisible(mode == LOOP_UNTIL_RX)
+        for w in (self.delay_label, self.delay):
+            w.setVisible(mode != LOOP_NONE)
+
+    def set_loop(self, loop: SequenceLoop) -> None:
+        index = self.mode.findData(loop.mode)
+        self.mode.setCurrentIndex(index if index >= 0 else 0)
+        self.count.setValue(loop.count)
+        self.until_rx.setText(loop.until_rx)
+        self.until_rx_fmt.setCurrentText(loop.until_rx_fmt)
+        self.delay.setValue(loop.delay_ms)
+        self._sync_visible()
+
+    def loop(self) -> SequenceLoop:
+        return SequenceLoop(
+            mode=self.mode.currentData(),
+            count=self.count.value(),
+            until_rx=self.until_rx.text(),
+            until_rx_fmt=self.until_rx_fmt.currentText(),
+            delay_ms=self.delay.value(),
+        )
 
 
 class ShortcutDialog(QDialog):
@@ -237,6 +311,8 @@ class SequenceEditorDialog(QDialog):
         self.enabled_check = QCheckBox("Run this sequence as part of the group")
         self.enabled_check.setChecked(sequence.enabled)
         form.addRow("Enabled", self.enabled_check)
+        self.loop_controls = SequenceLoopControls(sequence.loop)
+        form.addRow("Repeat", self.loop_controls)
         layout.addLayout(form)
 
         hint = QLabel("Steps run top to bottom. Double-click a row to edit.")
@@ -353,4 +429,5 @@ class SequenceEditorDialog(QDialog):
     def result_sequence(self) -> NamedSequence:
         name = self.name_edit.text().strip() or "Sequence"
         return NamedSequence(name=name, steps=list(self.steps),
-                             enabled=self.enabled_check.isChecked())
+                             enabled=self.enabled_check.isChecked(),
+                             loop=self.loop_controls.loop())

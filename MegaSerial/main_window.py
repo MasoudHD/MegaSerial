@@ -21,10 +21,12 @@ from . import config, theme, utils, sound, __app_name__, __version__
 from .serial_worker import SerialWorker, SerialConfig, available_ports, port_hwid
 from .sequence import (
     Step, NamedSequence, SequenceRunner, SequenceGroupRunner, RxMonitor,
-    ADVANCE_LABELS, steps_to_csv, steps_from_csv,
+    ADVANCE_LABELS, LOOP_FOREVER, loop_from_settings, steps_to_csv, steps_from_csv,
 )
 from .about import AboutDialog, DonationDialog
-from .dialogs import ShortcutDialog, StepDialog, SequenceEditorDialog
+from .dialogs import (
+    ShortcutDialog, StepDialog, SequenceEditorDialog, SequenceLoopControls,
+)
 from .monitor import (
     MonitorView, compile_filter, event_matches_filter, clamp_font_point_size,
     write_events_csv, DEFAULT_FONT_POINT_SIZE,
@@ -515,16 +517,8 @@ class MainWindow(QMainWindow):
         io_row.addWidget(self.export_btn)
         v.addLayout(io_row)
 
-        loop_row = QHBoxLayout()
-        self.loop_check = QCheckBox("Loop")
-        loop_row.addWidget(self.loop_check)
-        loop_row.addWidget(QLabel("Loop delay"))
-        self.loop_delay = QSpinBox()
-        self.loop_delay.setRange(0, 3_600_000)
-        self.loop_delay.setSuffix(" ms")
-        loop_row.addWidget(self.loop_delay)
-        loop_row.addStretch(1)
-        v.addLayout(loop_row)
+        self.loop_controls = SequenceLoopControls()
+        v.addWidget(self.loop_controls)
 
         self.seq_progress = QProgressBar()
         self.seq_progress.setTextVisible(True)
@@ -632,8 +626,7 @@ class MainWindow(QMainWindow):
         self.line_ending_combo.setCurrentText(c.get("line_ending", "CRLF (\\r\\n)"))
         self.custom_suffix_edit.setText(c.get("line_ending_custom_suffix", ""))
         self._sync_custom_suffix()
-        self.loop_check.setChecked(c.get("sequence_loop", False))
-        self.loop_delay.setValue(c.get("sequence_loop_delay_ms", 0))
+        self.loop_controls.set_loop(loop_from_settings(c))
         self.group_delay.setValue(c.get("group_delay_ms", 0))
         self.group_loop_check.setChecked(c.get("group_loop", False))
         self.project_name_edit.setText(c.get("project_name", ""))
@@ -676,8 +669,11 @@ class MainWindow(QMainWindow):
             "shortcuts": self.shortcuts,
             "history": self.history,
             "sequence": [s.to_dict() for s in self.steps],
-            "sequence_loop": self.loop_check.isChecked(),
-            "sequence_loop_delay_ms": self.loop_delay.value(),
+            "sequence_loop_config": self.loop_controls.loop().to_dict(),
+            # Kept with their original meaning so older builds reading this file
+            # still only loop forever when that is what was selected.
+            "sequence_loop": self.loop_controls.loop().mode == LOOP_FOREVER,
+            "sequence_loop_delay_ms": self.loop_controls.loop().delay_ms,
             "sequence_groups": [s.to_dict() for s in self.sequence_groups],
             "group_delay_ms": self.group_delay.value(),
             "group_loop": self.group_loop_check.isChecked(),
@@ -1239,13 +1235,17 @@ class MainWindow(QMainWindow):
         if not any(s.enabled for s in self.steps):
             QMessageBox.information(self, "Empty sequence", "Add at least one enabled step.")
             return
+        loop = self.loop_controls.loop()
+        try:
+            loop.until_rx_bytes()
+        except utils.ParseError as exc:
+            QMessageBox.warning(self, "Invalid loop pattern", str(exc))
+            return
         self.stop_sequence()
         for r in range(self.seq_table.rowCount()):
             self.seq_table.item(r, 5).setText("")
         self.runner = SequenceRunner(
-            self.steps, self.worker.write, self.rx_monitor,
-            loop=self.loop_check.isChecked(),
-            loop_delay_ms=self.loop_delay.value(),
+            self.steps, self.worker.write, self.rx_monitor, loop=loop,
         )
         self.runner.step_started.connect(self._on_step_started)
         self.runner.step_result.connect(self._on_step_result)
@@ -1445,12 +1445,18 @@ class MainWindow(QMainWindow):
         if not any(s.enabled for s in seq.steps):
             QMessageBox.information(self, "Empty sequence", f"\"{seq.name}\" has no enabled steps.")
             return
+        try:
+            seq.loop.until_rx_bytes()
+        except utils.ParseError as exc:
+            QMessageBox.warning(self, "Invalid loop pattern", str(exc))
+            return
         self.stop_sequence()
         self._clear_group_status()
         if self.group_table.item(row, GROUP_COL_STATUS):
             self.group_table.item(row, GROUP_COL_STATUS).setText("running…")
         self.group_table.selectRow(row)
-        self.runner = SequenceRunner(seq.steps, self.worker.write, self.rx_monitor)
+        self.runner = SequenceRunner(seq.steps, self.worker.write, self.rx_monitor,
+                                     loop=seq.loop)
         self.runner.step_started.connect(
             lambda _idx, _name, r=row: self.group_table.selectRow(r))
         self.runner.step_result.connect(
