@@ -3,6 +3,7 @@ shortcuts and the sequence runner."""
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from collections import deque
 from datetime import datetime
 
@@ -39,6 +40,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.cfg = config.load()
+        self._config_snapshot = deepcopy(self.cfg)
         self.worker: SerialWorker | None = None
         self.rx_monitor = RxMonitor()
         self.runner: SequenceRunner | None = None
@@ -1500,5 +1502,5 @@ class MainWindow(QMainWindow):
         self.stop_sequence()
         if self.worker:
             self.worker.stop()
-        config.save(self._collect_settings())
+        config.save(self._collect_settings(), snapshot=self._config_snapshot)
         super().closeEvent(event)

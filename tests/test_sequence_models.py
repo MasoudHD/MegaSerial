@@ -63,6 +63,12 @@ class StepModelTests(unittest.TestCase):
 
 
 class SequenceCsvTests(unittest.TestCase):
+    def _import_content(self, content: str, *, encoding: str = "utf-8") -> list[Step]:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "sequence.csv"
+            path.write_text(content, encoding=encoding)
+            return steps_from_csv(str(path))
+
     def test_csv_round_trip_preserves_fail_on_and_step_fields(self):
         steps = [
             Step(
@@ -103,6 +109,65 @@ class SequenceCsvTests(unittest.TestCase):
         self.assertEqual(len(restored), 1)
         self.assertEqual(restored[0].expect, "OK")
         self.assertEqual(restored[0].fail_on, "ERROR")
+
+    def test_csv_accepts_utf8_bom(self):
+        restored = self._import_content("name,data\nPing,AT\n", encoding="utf-8-sig")
+
+        self.assertEqual([(step.name, step.data) for step in restored], [("Ping", "AT")])
+
+    def test_omitted_csv_fields_use_step_defaults(self):
+        restored = self._import_content("name,data\nMinimal,AT\n")
+
+        self.assertEqual(restored, [Step(name="Minimal", data="AT")])
+
+    def test_unknown_csv_columns_are_ignored(self):
+        restored = self._import_content("name,data,unknown_column\nPing,AT,value\n")
+
+        self.assertEqual(restored, [Step(name="Ping", data="AT")])
+
+    def test_invalid_csv_enum_values_keep_current_fallbacks(self):
+        restored = self._import_content(
+            "name,fmt,expect_fmt,advance,on_timeout,line_ending\n"
+            "Fallback,unsupported,also-unsupported,later,unexpected,Unknown ending\n"
+        )
+
+        step = restored[0]
+        self.assertEqual(step.fmt, "ASCII")
+        self.assertEqual(step.expect_fmt, "ASCII")
+        self.assertEqual(step.advance, "time")
+        self.assertEqual(step.on_timeout, "unexpected")
+        self.assertEqual(step.line_ending, "Unknown ending")
+
+    def test_invalid_csv_integers_use_step_defaults(self):
+        restored = self._import_content(
+            "name,delay_ms,timeout_ms,max_retries\n"
+            "Fallback,not-an-int,also-not-an-int,nope\n"
+        )
+
+        step = restored[0]
+        self.assertEqual((step.delay_ms, step.timeout_ms, step.max_retries), (1000, 2000, 2))
+
+    def test_csv_boolean_parsing_uses_current_truthy_values_and_defaults(self):
+        restored = self._import_content(
+            "name,enabled,beep_on_match\n"
+            "True values,yes,on\n"
+            "False values,false,off\n"
+            "Empty values,,\n"
+        )
+
+        self.assertEqual(
+            [(step.enabled, step.beep_on_match) for step in restored],
+            [(True, True), (False, False), (True, False)],
+        )
+
+    def test_csv_fail_on_uses_the_expect_format(self):
+        restored = self._import_content(
+            "name,expect_fmt,fail_on\n"
+            "Check,hex,45 52 52 4F 52\n"
+        )
+
+        self.assertEqual(restored[0].fail_on, "45 52 52 4F 52")
+        self.assertEqual(restored[0].fail_on_bytes(), b"ERROR")
 
 
 if __name__ == "__main__":
