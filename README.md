@@ -43,6 +43,8 @@ plot live numeric data, and automate multi-step command sequences that advance
   with its own format (e.g. ASCII on the left, HEX on the right).
 - **Bytes per row** – for HEX / Binary / Hexdump views, choose 8 / 16 / 32 / 64
   bytes per line.
+- **Zoom** – `Ctrl` `+` / `Ctrl` `-` or `Ctrl` + mouse wheel resize the monitor
+  text; both split panes stay in step and the level is remembered.
 - **Send** data as ASCII (with `\n \r \t \xHH` escapes), HEX (`48 65` / `0x48`)
   or binary (`01001000`), with a selectable line ending (default **CRLF**).
 - **Shortcuts** – save frequently used commands and fire them with a double-click.
