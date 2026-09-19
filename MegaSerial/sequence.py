@@ -44,6 +44,7 @@ class Step:
     data: str = ""
     fmt: str = utils.FORMAT_ASCII
     line_ending: str = "CRLF (\\r\\n)"
+    custom_suffix: str = ""    # appended when line_ending is "Custom"
     enabled: bool = True
     advance: str = ADVANCE_TIME
     delay_ms: int = 1000
@@ -57,7 +58,7 @@ class Step:
     fail_on: str = ""          # if this reply is seen first, the step fails fast
 
     def payload_bytes(self) -> bytes:
-        return utils.build_payload(self.data, self.fmt, self.line_ending)
+        return utils.build_payload(self.data, self.fmt, self.line_ending, self.custom_suffix)
 
     def expect_bytes(self) -> bytes:
         if not self.expect:
@@ -124,7 +125,7 @@ class NamedSequence:
 CSV_FIELDS = [
     "name", "data", "fmt", "line_ending", "enabled", "advance", "delay_ms",
     "expect", "expect_fmt", "timeout_ms", "on_timeout", "max_retries", "beep_on_match",
-    "fail_on",
+    "fail_on", "custom_suffix",
 ]
 
 

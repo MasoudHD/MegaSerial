@@ -47,6 +47,9 @@ plot live numeric data, and automate multi-step command sequences that advance
   text; both split panes stay in step and the level is remembered.
 - **Send** data as ASCII (with `\n \r \t \xHH` escapes), HEX (`48 65` / `0x48`)
   or binary (`01001000`), with a selectable line ending (default **CRLF**).
+- **Custom line ending** – pick `Custom` to append any suffix you like, written
+  with the same escapes (e.g. `\x1a` for Ctrl-Z). Works for manual sends,
+  shortcuts, history resends and sequence steps alike.
 - **Log export** – save the monitor as plain text, or as structured CSV
   (timestamp, elapsed time, direction, hex payload, log message) for analysis in
   Excel. See [docs/export-formats.md](docs/export-formats.md).

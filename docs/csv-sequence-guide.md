@@ -11,7 +11,7 @@ the next one.
 2. Put this header on the **first line** (this is the full set of columns):
 
 ```csv
-name,data,fmt,line_ending,enabled,advance,delay_ms,expect,expect_fmt,timeout_ms,on_timeout,max_retries,beep_on_match,fail_on
+name,data,fmt,line_ending,enabled,advance,delay_ms,expect,expect_fmt,timeout_ms,on_timeout,max_retries,beep_on_match,fail_on,custom_suffix
 ```
 
 3. Add one row per step.
@@ -48,7 +48,7 @@ Query,AT+VER,ascii,time,1000
 | `name`         | Label shown in the step table                    | any text                                                  | `Step`         |
 | `data`         | Payload to send                                  | text/hex/binary depending on `fmt`                        | *(empty)*      |
 | `fmt`          | How `data` is interpreted                        | `ASCII`, `HEX`, `Binary` (case-insensitive)               | `ASCII`        |
-| `line_ending`  | Appended after the payload when sending          | `None`, `LF (\n)`, `CR (\r)`, `CRLF (\r\n)`               | `CRLF (\r\n)`  |
+| `line_ending`  | Appended after the payload when sending          | `None`, `LF (\n)`, `CR (\r)`, `CRLF (\r\n)`, `Custom`     | `CRLF (\r\n)`  |
 | `enabled`      | Whether the step runs                            | `true` / `false` (`1`, `yes`, `on` also count as true)    | `true`         |
 | `advance`      | When to move to the next step                    | `time`, `response`, `both`                                 | `time`         |
 | `delay_ms`     | Fixed wait in milliseconds                        | integer                                                    | `1000`         |
@@ -59,6 +59,16 @@ Query,AT+VER,ascii,time,1000
 | `max_retries`  | Retries when `on_timeout` is `retry`              | integer                                                    | `2`            |
 | `beep_on_match`| Play a sound when `expect` is received            | `true` / `false`                                           | `false`        |
 | `fail_on`      | Reply that marks the step as failed before `expect` matches | text/hex/binary according to `expect_fmt`            | *(empty)*      |
+| `custom_suffix`| Suffix appended when `line_ending` is `Custom`    | ASCII text with `\n \r \t \0 \\ \xHH` escapes             | *(empty)*      |
+
+### Custom line endings
+
+Set `line_ending` to `Custom` and put the bytes you want appended in
+`custom_suffix`. It is parsed with the same ASCII escape rules as an `ascii`
+`data` cell, so `\r\n`, `\t` and `\x1a` all work. An empty `custom_suffix`
+appends nothing, and an invalid escape such as `\xZZ` fails the step with a
+parse error. Files written before this column existed import unchanged: their
+`line_ending` keeps its fixed meaning.
 
 ### How `advance` uses the other columns
 

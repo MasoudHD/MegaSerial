@@ -20,6 +20,8 @@ _ON_TIMEOUT_LABELS = {
     ON_TIMEOUT_RETRY: "Retry this step",
 }
 
+_CUSTOM_SUFFIX_HINT = "Suffix bytes, e.g. \\r\\n or \\x00 — used when Line ending is Custom"
+
 
 class ShortcutDialog(QDialog):
     """Edit a saved command (shortcut)."""
@@ -44,20 +46,30 @@ class ShortcutDialog(QDialog):
         self.fmt.setCurrentText(shortcut.get("fmt", utils.FORMAT_ASCII))
 
         self.line_ending = QComboBox()
-        self.line_ending.addItems(utils.LINE_ENDINGS.keys())
+        self.line_ending.addItems(utils.LINE_ENDING_LABELS)
         self.line_ending.setCurrentText(shortcut.get("line_ending", "CRLF (\\r\\n)"))
+        self.line_ending.currentTextChanged.connect(self._sync_custom_suffix)
+
+        self.custom_suffix = QLineEdit(shortcut.get("custom_suffix", ""))
+        self.custom_suffix.setPlaceholderText(_CUSTOM_SUFFIX_HINT)
 
         form.addRow("Name", self.name)
         form.addRow("Data", self.data)
         form.addRow("Format", self.fmt)
         form.addRow("Line ending", self.line_ending)
+        form.addRow("Custom suffix", self.custom_suffix)
         layout.addLayout(form)
+        self._sync_custom_suffix()
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+    def _sync_custom_suffix(self, *_args) -> None:
+        self.custom_suffix.setEnabled(
+            self.line_ending.currentText() == utils.LINE_ENDING_CUSTOM)
 
     def result_dict(self) -> dict:
         name = self.name.text().strip() or utils.human_preview(
@@ -68,6 +80,7 @@ class ShortcutDialog(QDialog):
             "data": self.data.text(),
             "fmt": self.fmt.currentText(),
             "line_ending": self.line_ending.currentText(),
+            "custom_suffix": self.custom_suffix.text(),
         }
 
 
@@ -94,8 +107,12 @@ class StepDialog(QDialog):
         self.fmt.setCurrentText(step.fmt)
 
         self.line_ending = QComboBox()
-        self.line_ending.addItems(utils.LINE_ENDINGS.keys())
+        self.line_ending.addItems(utils.LINE_ENDING_LABELS)
         self.line_ending.setCurrentText(step.line_ending)
+        self.line_ending.currentTextChanged.connect(self._sync_enabled)
+
+        self.custom_suffix = QLineEdit(step.custom_suffix)
+        self.custom_suffix.setPlaceholderText(_CUSTOM_SUFFIX_HINT)
 
         self.advance = QComboBox()
         for mode in ADVANCE_MODES:
@@ -142,6 +159,7 @@ class StepDialog(QDialog):
         form.addRow("Data", self.data)
         form.addRow("Format", self.fmt)
         form.addRow("Line ending", self.line_ending)
+        form.addRow("Custom suffix", self.custom_suffix)
         form.addRow("Advance when", self.advance)
         form.addRow("Delay", self.delay)
         form.addRow("Expected response", self.expect)
@@ -168,7 +186,9 @@ class StepDialog(QDialog):
 
         self._sync_enabled()
 
-    def _sync_enabled(self) -> None:
+    def _sync_enabled(self, *_args) -> None:
+        self.custom_suffix.setEnabled(
+            self.line_ending.currentText() == utils.LINE_ENDING_CUSTOM)
         mode = self.advance.currentData()
         wants_response = mode != ADVANCE_TIME
         self.expect.setEnabled(wants_response)
@@ -185,6 +205,7 @@ class StepDialog(QDialog):
             data=self.data.toPlainText(),
             fmt=self.fmt.currentText(),
             line_ending=self.line_ending.currentText(),
+            custom_suffix=self.custom_suffix.text(),
             advance=self.advance.currentData(),
             delay_ms=self.delay.value(),
             expect=self.expect.text(),

@@ -105,6 +105,7 @@ DEFAULTS = {
     "line_mode": True,
     "send_format": "ASCII",
     "line_ending": "CRLF (\\r\\n)",
+    "line_ending_custom_suffix": "",
     "clear_after_send": False,
     "echo_tx": True,
     "last_port": "",

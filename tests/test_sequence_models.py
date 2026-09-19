@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from MegaSerial import utils
 from MegaSerial.sequence import (
     ADVANCE_BOTH,
     ON_TIMEOUT_RETRY,
@@ -60,6 +61,37 @@ class StepModelTests(unittest.TestCase):
         self.assertEqual(restored.name, "Bring up")
         self.assertEqual(restored.steps[0].name, "Ping")
         self.assertEqual(restored.steps[0].fail_on, "ERROR")
+
+    def test_custom_line_ending_builds_the_step_payload_from_the_suffix(self):
+        step = Step(data="AT", line_ending=utils.LINE_ENDING_CUSTOM, custom_suffix=r"\r\n\x00")
+
+        self.assertEqual(step.payload_bytes(), b"AT\r\n\x00")
+
+    def test_custom_line_ending_without_a_suffix_appends_nothing(self):
+        step = Step(data="AT", line_ending=utils.LINE_ENDING_CUSTOM)
+
+        self.assertEqual(step.payload_bytes(), b"AT")
+
+    def test_invalid_custom_suffix_raises_when_the_payload_is_built(self):
+        step = Step(data="AT", line_ending=utils.LINE_ENDING_CUSTOM, custom_suffix=r"\xZZ")
+
+        with self.assertRaises(utils.ParseError):
+            step.payload_bytes()
+
+    def test_steps_saved_before_custom_suffix_existed_keep_their_line_ending(self):
+        legacy = {"name": "Legacy", "data": "AT", "line_ending": "CRLF (\\r\\n)"}
+        step = Step.from_dict(legacy)
+
+        self.assertEqual(step.custom_suffix, "")
+        self.assertEqual(step.payload_bytes(), b"AT\r\n")
+
+    def test_dict_round_trip_preserves_the_custom_suffix(self):
+        step = Step(name="Ctrl-Z", data="AT",
+                    line_ending=utils.LINE_ENDING_CUSTOM, custom_suffix=r"\x1a")
+        restored = Step.from_dict(step.to_dict())
+
+        self.assertEqual(restored, step)
+        self.assertEqual(restored.payload_bytes(), b"AT\x1a")
 
 
 class SequenceCsvTests(unittest.TestCase):
@@ -168,6 +200,30 @@ class SequenceCsvTests(unittest.TestCase):
 
         self.assertEqual(restored[0].fail_on, "45 52 52 4F 52")
         self.assertEqual(restored[0].fail_on_bytes(), b"ERROR")
+
+    def test_custom_suffix_round_trips_through_csv(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "sequence.csv"
+            steps_to_csv(str(path), [
+                Step(name="Custom", data="AT", line_ending=utils.LINE_ENDING_CUSTOM,
+                     custom_suffix=r"\x1a"),
+            ])
+            header = path.read_text(encoding="utf-8").splitlines()[0]
+            restored = steps_from_csv(str(path))
+
+        self.assertIn("custom_suffix", header)
+        self.assertEqual(restored[0].line_ending, utils.LINE_ENDING_CUSTOM)
+        self.assertEqual(restored[0].custom_suffix, r"\x1a")
+        self.assertEqual(restored[0].payload_bytes(), b"AT\x1a")
+
+    def test_legacy_csv_without_custom_suffix_still_imports(self):
+        restored = self._import_content(
+            "name,data,line_ending\n"
+            "Legacy,AT,CRLF (\\r\\n)\n"
+        )
+
+        self.assertEqual(restored[0].custom_suffix, "")
+        self.assertEqual(restored[0].payload_bytes(), b"AT\r\n")
 
 
 if __name__ == "__main__":

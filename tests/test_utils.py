@@ -94,5 +94,51 @@ class PayloadConstructionTests(unittest.TestCase):
             utils.build_payload("A", "HEX", "CRLF (\\r\\n)")
 
 
+class CustomLineEndingTests(unittest.TestCase):
+    def test_custom_is_offered_alongside_the_existing_fixed_endings(self):
+        self.assertEqual(
+            utils.LINE_ENDING_LABELS,
+            ("None", "LF (\\n)", "CR (\\r)", "CRLF (\\r\\n)", utils.LINE_ENDING_CUSTOM),
+        )
+
+    def test_fixed_endings_ignore_any_custom_suffix(self):
+        for label, expected in utils.LINE_ENDINGS.items():
+            with self.subTest(label=label):
+                self.assertEqual(utils.line_ending_bytes(label, "ignored"), expected)
+                self.assertEqual(utils.build_payload("AT", "ASCII", label, "ignored"),
+                                 b"AT" + expected)
+
+    def test_empty_custom_suffix_appends_nothing(self):
+        self.assertEqual(utils.line_ending_bytes(utils.LINE_ENDING_CUSTOM, ""), b"")
+        self.assertEqual(utils.line_ending_bytes(utils.LINE_ENDING_CUSTOM), b"")
+        self.assertEqual(
+            utils.build_payload("AT", "ASCII", utils.LINE_ENDING_CUSTOM, ""), b"AT")
+
+    def test_custom_suffix_expands_ascii_escapes(self):
+        self.assertEqual(
+            utils.build_payload("AT", "ASCII", utils.LINE_ENDING_CUSTOM, r"\r\n"), b"AT\r\n")
+        self.assertEqual(
+            utils.build_payload("AT", "ASCII", utils.LINE_ENDING_CUSTOM, r"\t"), b"AT\t")
+        self.assertEqual(
+            utils.build_payload("AT", "ASCII", utils.LINE_ENDING_CUSTOM, "END"), b"ATEND")
+
+    def test_custom_suffix_supports_binary_byte_escapes(self):
+        self.assertEqual(
+            utils.build_payload("AT", "ASCII", utils.LINE_ENDING_CUSTOM, r"\x00\xFF"),
+            b"AT\x00\xff",
+        )
+        self.assertEqual(
+            utils.build_payload("41 54", "HEX", utils.LINE_ENDING_CUSTOM, r"\x1a"), b"AT\x1a")
+
+    def test_invalid_custom_suffix_raises_parse_error(self):
+        with self.assertRaisesRegex(utils.ParseError, "Invalid \\\\x escape"):
+            utils.build_payload("AT", "ASCII", utils.LINE_ENDING_CUSTOM, r"\xZZ")
+
+    def test_custom_suffix_does_not_change_existing_call_signatures(self):
+        # Callers written before the custom suffix existed keep working.
+        self.assertEqual(utils.build_payload("AT", "ASCII", "LF (\\n)"), b"AT\n")
+        self.assertEqual(utils.build_payload("AT", "ASCII", utils.LINE_ENDING_CUSTOM), b"AT")
+
+
 if __name__ == "__main__":
     unittest.main()

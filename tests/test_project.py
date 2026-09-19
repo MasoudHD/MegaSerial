@@ -8,7 +8,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from MegaSerial import project
+from MegaSerial import project, utils
+from MegaSerial.sequence import Step
 
 
 TS = datetime(2024, 1, 2, 3, 4, 5, 123456)
@@ -108,6 +109,30 @@ class ProjectSerializationTests(unittest.TestCase):
             })
 
         self.assertEqual(loaded["events"][0]["ts"], TS)
+
+    def test_custom_send_suffix_round_trips_through_a_project_file(self):
+        settings = {
+            "line_ending": utils.LINE_ENDING_CUSTOM,
+            "line_ending_custom_suffix": r"\x1a",
+            "shortcuts": [{"name": "Ctrl-Z", "data": "AT", "fmt": "ASCII",
+                           "line_ending": utils.LINE_ENDING_CUSTOM, "custom_suffix": r"\x1a"}],
+            "sequence": [Step(name="Ctrl-Z", data="AT",
+                              line_ending=utils.LINE_ENDING_CUSTOM,
+                              custom_suffix=r"\x1a").to_dict()],
+        }
+        data = project.collect_project_data(
+            project_name="Custom", settings=settings, events=[])
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "project.msproj"
+            project.save_project(path, data)
+            loaded = project.load_project(path)
+
+        restored = loaded["settings"]
+        self.assertEqual(restored["line_ending"], utils.LINE_ENDING_CUSTOM)
+        self.assertEqual(restored["line_ending_custom_suffix"], r"\x1a")
+        self.assertEqual(restored["shortcuts"][0]["custom_suffix"], r"\x1a")
+        self.assertEqual(Step.from_dict(restored["sequence"][0]).payload_bytes(), b"AT\x1a")
 
     def test_invalid_hex_event_data_raises_value_error(self):
         with self.assertRaises(ValueError):

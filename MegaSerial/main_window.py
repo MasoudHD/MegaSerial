@@ -118,6 +118,7 @@ class MainWindow(QMainWindow):
         self._history_nav_setting = False
         self.send_fmt_combo.setCurrentText(utils.normalize_format(entry.get("fmt", "ASCII")))
         self.line_ending_combo.setCurrentText(entry.get("line_ending", "CRLF (\\r\\n)"))
+        self.custom_suffix_edit.setText(entry.get("custom_suffix", ""))
 
     def _on_send_input_changed(self, _text: str) -> None:
         if not self._history_nav_setting:
@@ -390,8 +391,17 @@ class MainWindow(QMainWindow):
         self.send_fmt_combo.addItems(utils.FORMATS)
         row.addWidget(self.send_fmt_combo)
         self.line_ending_combo = QComboBox()
-        self.line_ending_combo.addItems(utils.LINE_ENDINGS.keys())
+        self.line_ending_combo.addItems(utils.LINE_ENDING_LABELS)
+        self.line_ending_combo.currentTextChanged.connect(self._sync_custom_suffix)
         row.addWidget(self.line_ending_combo)
+        # Only shown for the "Custom" line ending, so the send bar stays compact.
+        self.custom_suffix_edit = QLineEdit()
+        self.custom_suffix_edit.setPlaceholderText("Suffix, e.g. \\r\\n or \\x00")
+        self.custom_suffix_edit.setToolTip(
+            "Bytes appended after the payload. Supports \\r \\n \\t \\0 and \\xNN escapes.")
+        self.custom_suffix_edit.setMaximumWidth(160)
+        self.custom_suffix_edit.setVisible(False)
+        row.addWidget(self.custom_suffix_edit)
         self.send_btn = QPushButton("Send")
         self.send_btn.setObjectName("accent")
         self.send_btn.clicked.connect(self.send_current)
@@ -611,6 +621,8 @@ class MainWindow(QMainWindow):
         self.linemode_check.setChecked(c.get("line_mode", True))
         self.send_fmt_combo.setCurrentText(c.get("send_format", "ASCII"))
         self.line_ending_combo.setCurrentText(c.get("line_ending", "CRLF (\\r\\n)"))
+        self.custom_suffix_edit.setText(c.get("line_ending_custom_suffix", ""))
+        self._sync_custom_suffix()
         self.loop_check.setChecked(c.get("sequence_loop", False))
         self.loop_delay.setValue(c.get("sequence_loop_delay_ms", 0))
         self.group_delay.setValue(c.get("group_delay_ms", 0))
@@ -643,6 +655,7 @@ class MainWindow(QMainWindow):
             "line_mode": self.linemode_check.isChecked(),
             "send_format": self.send_fmt_combo.currentText(),
             "line_ending": self.line_ending_combo.currentText(),
+            "line_ending_custom_suffix": self.custom_suffix_edit.text(),
             "last_port": self.port_combo.currentData() or self.port_combo.currentText(),
             "baudrate": int(self.baud_combo.currentText() or 115200),
             "bytesize": int(self.databits_combo.currentText()),
@@ -987,17 +1000,22 @@ class MainWindow(QMainWindow):
             self._append_data("tx", data)
         return ok
 
+    def _sync_custom_suffix(self, *_args) -> None:
+        self.custom_suffix_edit.setVisible(
+            self.line_ending_combo.currentText() == utils.LINE_ENDING_CUSTOM)
+
     def send_current(self) -> None:
         text = self.send_input.text()
         fmt = self.send_fmt_combo.currentText()
         line_ending = self.line_ending_combo.currentText()
+        suffix = self.custom_suffix_edit.text()
         try:
-            payload = utils.build_payload(text, fmt, line_ending)
+            payload = utils.build_payload(text, fmt, line_ending, suffix)
         except utils.ParseError as exc:
             QMessageBox.warning(self, "Invalid data", str(exc))
             return
         if self._write_bytes(payload):
-            self._record_history(text, fmt, line_ending)
+            self._record_history(text, fmt, line_ending, suffix)
             self._history_nav_index = -1
             self._history_nav_pending = ""
             if self.clear_after_send_check.isChecked():
@@ -1022,20 +1040,23 @@ class MainWindow(QMainWindow):
             return
         sc = self.shortcuts[row]
         line_ending = sc.get("line_ending", "None")
+        suffix = sc.get("custom_suffix", "")
         try:
             payload = utils.build_payload(
-                sc.get("data", ""), sc.get("fmt", "ASCII"), line_ending)
+                sc.get("data", ""), sc.get("fmt", "ASCII"), line_ending, suffix)
         except utils.ParseError as exc:
             QMessageBox.warning(self, "Invalid shortcut", str(exc))
             return
         if self._write_bytes(payload):
-            self._record_history(sc.get("data", ""), sc.get("fmt", "ASCII"), line_ending)
+            self._record_history(
+                sc.get("data", ""), sc.get("fmt", "ASCII"), line_ending, suffix)
 
     def add_shortcut(self) -> None:
         dlg = ShortcutDialog(self, {
             "data": self.send_input.text(),
             "fmt": self.send_fmt_combo.currentText(),
             "line_ending": self.line_ending_combo.currentText(),
+            "custom_suffix": self.custom_suffix_edit.text(),
         })
         if dlg.exec():
             self.shortcuts.append(dlg.result_dict())
@@ -1062,12 +1083,14 @@ class MainWindow(QMainWindow):
         self._rebuild_shortcuts()
 
     # ---------------------------------------------------------------- history
-    def _record_history(self, text: str, fmt: str, line_ending: str) -> None:
+    def _record_history(self, text: str, fmt: str, line_ending: str,
+                        custom_suffix: str = "") -> None:
         entry = {
             "ts": datetime.now().strftime("%H:%M:%S"),
             "text": text,
             "fmt": fmt,
             "line_ending": line_ending,
+            "custom_suffix": custom_suffix,
         }
         self.history.insert(0, entry)
         del self.history[MAX_HISTORY:]
@@ -1089,6 +1112,7 @@ class MainWindow(QMainWindow):
         self.send_input.setText(h.get("text", ""))
         self.send_fmt_combo.setCurrentText(utils.normalize_format(h.get("fmt", "ASCII")))
         self.line_ending_combo.setCurrentText(h.get("line_ending", "CRLF (\\r\\n)"))
+        self.custom_suffix_edit.setText(h.get("custom_suffix", ""))
         self.send_input.setFocus()
 
     def resend_history(self) -> None:
@@ -1098,7 +1122,9 @@ class MainWindow(QMainWindow):
         h = self.history[row]
         fmt = utils.normalize_format(h.get("fmt", "ASCII"))
         try:
-            payload = utils.build_payload(h.get("text", ""), fmt, h.get("line_ending", "None"))
+            payload = utils.build_payload(
+                h.get("text", ""), fmt, h.get("line_ending", "None"),
+                h.get("custom_suffix", ""))
         except utils.ParseError as exc:
             QMessageBox.warning(self, "Invalid data", str(exc))
             return
@@ -1113,6 +1139,7 @@ class MainWindow(QMainWindow):
             "data": h.get("text", ""),
             "fmt": utils.normalize_format(h.get("fmt", "ASCII")),
             "line_ending": h.get("line_ending", "CRLF (\\r\\n)"),
+            "custom_suffix": h.get("custom_suffix", ""),
         })
         if dlg.exec():
             self.shortcuts.append(dlg.result_dict())

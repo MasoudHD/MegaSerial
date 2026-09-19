@@ -24,6 +24,12 @@ LINE_ENDINGS = {
     "CRLF (\\r\\n)": b"\r\n",
 }
 
+# Selecting this label appends a user-supplied suffix instead of a fixed one.
+LINE_ENDING_CUSTOM = "Custom"
+
+# Every label a line-ending selector offers, in display order.
+LINE_ENDING_LABELS = (*LINE_ENDINGS, LINE_ENDING_CUSTOM)
+
 _ASCII_ESCAPES = {
     "n": b"\n",
     "r": b"\r",
@@ -123,9 +129,22 @@ def parse_input(text: str, fmt: str) -> bytes:
     raise ParseError(f"Unknown format: {fmt}")
 
 
-def build_payload(text: str, fmt: str, line_ending: str | None) -> bytes:
+def line_ending_bytes(line_ending: str | None, custom_suffix: str = "") -> bytes:
+    """Resolve a line-ending label to the bytes appended after a payload.
+
+    ``Custom`` parses *custom_suffix* with the ASCII escape rules, so
+    ``\\r \\n \\t \\xHH`` all work. Unknown labels append nothing, which keeps
+    settings written by older versions usable.
+    """
+    if line_ending == LINE_ENDING_CUSTOM:
+        return parse_ascii(custom_suffix or "")
+    return LINE_ENDINGS.get(line_ending, b"")
+
+
+def build_payload(text: str, fmt: str, line_ending: str | None,
+                  custom_suffix: str = "") -> bytes:
     """Parse a send payload and append the selected line ending."""
-    return parse_input(text, fmt) + LINE_ENDINGS.get(line_ending, b"")
+    return parse_input(text, fmt) + line_ending_bytes(line_ending, custom_suffix)
 
 
 # ---------------------------------------------------------------------------
