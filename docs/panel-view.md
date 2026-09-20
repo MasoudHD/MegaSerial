@@ -123,3 +123,22 @@ their own packet boundaries rather than Line mode. The zMonitor preset supports
 channel mapping, title/style commands and ANSI colors. See the
 [protocol profile guide](protocol-profiles.md) for setup, preview, file sharing,
 metadata, export and framing limitations.
+
+## Show or hide windows
+
+In Panel View, **Windows ▾** lists every configured panel by position ID and title.
+Uncheck a panel to hide it; check it to show it again. Other panels share the
+available row width, and completely hidden rows collapse. IDs never change when
+panels are hidden. The dropdown remains accessible when all panels are hidden.
+
+Hidden panels continue receiving and retaining data under the existing shared
+6,000-event limit. Showing a panel restores its retained content under the current
+search filter. Visibility is independent of the search-scope **Panels** menu and
+does not change routing or export contents. The Windows list follows title and
+layout changes. New positions are visible by default.
+
+An optional `hidden_ids` list in the project's `panel_view` metadata saves this
+state. Older projects show all panels. Removing a position also removes its hidden
+state; adding that position later shows it by default. No project format version
+change is required. Manually check row resizing and all-hidden recovery on your
+desktop before merge.

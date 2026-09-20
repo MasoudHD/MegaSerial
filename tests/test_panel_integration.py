@@ -231,3 +231,66 @@ class PanelIntegrationTests(unittest.TestCase):
         w.panel_view.set_workspace(updated.result_workspace)
         self.assertEqual(w.panel_view.widgets['32'].header.text(), '32 — GPS Receiver')
         self.assertIn('after creation', self.text('32'))
+
+    def test_windows_menu_hides_rows_without_losing_rx_or_changing_ids(self):
+        w = self.window
+        view = w.panel_view
+        w.show()
+        _APP.processEvents()
+        width_before = view.widgets['11'].width()
+        actions = {a.data(): a for a in view.windows_menu.actions()}
+        self.assertEqual(set(actions), {'11', '12', '21'})
+        self.assertTrue(all(a.isChecked() for a in actions.values()))
+        actions['12'].trigger()
+        _APP.processEvents()
+        self.assertTrue(view.widgets['12'].isHidden())
+        self.assertGreater(view.widgets['11'].width(), width_before)
+        w.on_data_received(b'@PANEL:12|received while hidden\n@PANEL_TITLE:12|New title\n')
+        self.assertIn('received while hidden', self.text('12'))
+        renamed = next(a for a in view.windows_menu.actions() if a.data() == '12')
+        self.assertEqual(renamed.text(), '12 — New title')
+        self.assertFalse(renamed.isChecked())
+        events = deepcopy(list(w.events))
+        view.set_panel_visible('21', False)
+        self.assertTrue(view.rows[1][0].isHidden())
+        view.set_panel_visible('11', False)
+        self.assertTrue(view.empty_label.isVisible())
+        self.assertTrue(view.windows_button.isVisible())
+        renamed.trigger()
+        self.assertFalse(view.widgets['12'].isHidden())
+        self.assertFalse(view.rows[0][0].isHidden())
+        self.assertIn('received while hidden', self.text('12'))
+        self.assertEqual(list(w.events), events)
+        self.assertEqual(list(view.widgets), ['11', '12', '21'])
+        w.presentation_combo.setCurrentIndex(0)
+        self.assertTrue(view.windows_button.isHidden())
+
+    def test_visibility_project_restore_layout_edit_and_legacy_defaults(self):
+        import tempfile
+        from pathlib import Path
+        from MegaSerial import project
+        w = self.window
+        w.panel_view.set_panel_visible('12', False)
+        w.on_data_received(b'@PANEL:12|saved hidden content\n')
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'hidden.msproj'
+            with patch('MegaSerial.main_window.QFileDialog.getSaveFileName', return_value=(str(path), '')):
+                w.save_project()
+            w.panel_view.set_panel_visible('12', True)
+            self.assertTrue(w.open_project(str(path)))
+            self.assertTrue(w.panel_view.widgets['12'].isHidden())
+            self.assertIn('saved hidden content', self.text('12'))
+            dialog = PanelLayoutDialog(w.panel_view.workspace)
+            self.addCleanup(dialog.deleteLater)
+            dialog.counts.cellWidget(0, 0).setValue(3)
+            dialog.accept()
+            w.panel_view.set_workspace(dialog.result_workspace)
+            self.assertTrue(w.panel_view.widgets['12'].isHidden())
+            self.assertFalse(w.panel_view.widgets['13'].isHidden())
+            self.assertEqual(len(w.panel_view.windows_menu.actions()), 4)
+            data = project.load_project(path)
+            data['panel_view'].pop('hidden_ids')
+            project.save_project(path, project.collect_project_data(
+                project_name='Legacy', settings={}, events=data['events'], panel_view=data['panel_view']))
+            self.assertTrue(w.open_project(str(path)))
+            self.assertTrue(all(not widget.isHidden() for widget in w.panel_view.widgets.values()))

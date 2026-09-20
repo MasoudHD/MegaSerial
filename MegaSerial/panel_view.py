@@ -122,6 +122,10 @@ class PanelView(QScrollArea):
         self.scope_button = QPushButton("Panels ▾")
         self.scope_menu = QMenu(self.scope_button)
         self.scope_button.setMenu(self.scope_menu)
+        self.windows_button = QPushButton("Windows ▾")
+        self.windows_button.setToolTip("Show or hide panels; hidden panels keep receiving data")
+        self.windows_menu = QMenu(self.windows_button)
+        self.windows_button.setMenu(self.windows_menu)
         self.setWidgetResizable(True)
         self.rebuild()
 
@@ -145,20 +149,31 @@ class PanelView(QScrollArea):
         self.previous = {}
         self.rendered_blocks = {}
         idx = 0
+        self.rows = []
         for count in self.workspace.row_counts:
-            row = QHBoxLayout()
+            row_widget = QWidget()
+            row = QHBoxLayout(row_widget)
+            row.setContentsMargins(0, 0, 0, 0)
+            row_ids = []
             for _ in range(count):
                 panel = self.workspace.panels[idx]
                 widget = PanelWidget(panel, self.font_size, self.on_zoom)
                 self.widgets[panel["id"]] = widget
                 row.addWidget(widget, 1)
+                row_ids.append(panel["id"])
                 idx += 1
-            layout.addLayout(row, 1)
+            self.rows.append((row_widget, row_ids))
+            layout.addWidget(row_widget, 1)
+        self.empty_label = QLabel("All windows are hidden. Use Windows to show a panel.")
+        self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.empty_label, 1)
         self.setWidget(body)
         self.refresh_titles()
+        self._sync_visibility()
 
     def refresh_titles(self):
         self.scope_menu.clear()
+        self.windows_menu.clear()
         all_action = self.scope_menu.addAction("All")
         all_action.setCheckable(True)
         all_action.setChecked(self.workspace.scope is None)
@@ -178,6 +193,24 @@ class PanelView(QScrollArea):
             action.setCheckable(True)
             action.setChecked(self.workspace.in_scope(ident))
             action.triggered.connect(lambda checked, ident=ident: self._scope(ident, checked))
+            visibility = self.windows_menu.addAction(f"{ident} — {title}")
+            visibility.setData(ident)
+            visibility.setCheckable(True)
+            visibility.setChecked(self.workspace.is_visible(ident))
+            visibility.triggered.connect(lambda checked, ident=ident: self.set_panel_visible(ident, checked))
+
+    def set_panel_visible(self, ident, visible):
+        self.workspace.set_visible(ident, visible)
+        self._sync_visibility()
+        for action in self.windows_menu.actions():
+            action.setChecked(self.workspace.is_visible(action.data()))
+
+    def _sync_visibility(self):
+        for ident, widget in self.widgets.items():
+            widget.setVisible(self.workspace.is_visible(ident))
+        for row, ids in self.rows:
+            row.setVisible(any(self.workspace.is_visible(ident) for ident in ids))
+        self.empty_label.setVisible(not any(self.workspace.is_visible(i) for i in self.widgets))
 
     def apply_control(self, ev):
         """Apply a decoded title/style command to its configured destination."""

@@ -61,3 +61,21 @@ class WorkspaceTests(unittest.TestCase):
         for bad in (None, [], {"row_counts": [0]}, {"max_columns": 999},
                     {"panels": [{"id": "12", "title": "GPS"}]}):
             self.assertEqual(PanelWorkspace.restore(bad).to_dict(), PanelWorkspace().to_dict())
+
+    def test_visibility_preserves_routing_scope_and_handles_layout_changes(self):
+        w = workspace()
+        w.scope = ['12']
+        w.set_visible('12', False)
+        self.assertFalse(w.is_visible('12'))
+        self.assertEqual(w.destination({'panel_id': '12'}), '12')
+        self.assertTrue(w.in_scope('12'))
+        restored = PanelWorkspace(w.to_dict())
+        self.assertFalse(restored.is_visible('12'))
+        restored.set_visible('12', True)
+        self.assertTrue(restored.is_visible('12'))
+        state = w.to_dict()
+        state['row_counts'] = [1]
+        state['panels'] = state['panels'][:1]
+        self.assertEqual(PanelWorkspace(state).hidden_ids, [])
+        self.assertEqual(workspace().hidden_ids, [])
+        self.assertEqual(PanelWorkspace({**state, 'hidden_ids': 'invalid'}).hidden_ids, [])

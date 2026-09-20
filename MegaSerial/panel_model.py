@@ -25,6 +25,7 @@ class PanelWorkspace:
         self.row_counts = [1]
         self.panels = [{"id": GENERAL, "title": "General"}]
         self.protocol_profile = preset()
+        self.hidden_ids = []
         self.scope = None  # None means All, [] means no panels are filtered.
         if state is not None:
             self._load(state)
@@ -65,6 +66,8 @@ class PanelWorkspace:
         for panel in self.panels:
             panel["title"] = panel["title"] or default_title(panel["id"])
         self.scope = None if scope is None else list(dict.fromkeys(s for s in scope if s in ids))
+        hidden = state.get("hidden_ids", [])
+        self.hidden_ids = [ident for ident in ids if ident in hidden] if isinstance(hidden, list) else []
 
     @classmethod
     def restore(cls, state):
@@ -77,7 +80,19 @@ class PanelWorkspace:
         return {"schema_version": PANEL_SCHEMA_VERSION, "active": self.active, "rows": len(self.row_counts),
                 "max_columns": self.max_columns, "row_counts": list(self.row_counts),
                 "panels": deepcopy(self.panels), "scope": deepcopy(self.scope),
-                "protocol_profile": deepcopy(self.protocol_profile)}
+                "protocol_profile": deepcopy(self.protocol_profile),
+                "hidden_ids": list(self.hidden_ids)}
+
+    def is_visible(self, ident):
+        return ident not in self.hidden_ids
+
+    def set_visible(self, ident, visible):
+        if ident not in self.titles():
+            return
+        if visible:
+            self.hidden_ids = [i for i in self.hidden_ids if i != ident]
+        elif ident not in self.hidden_ids:
+            self.hidden_ids.append(ident)
 
     def destination(self, event):
         ident = event.get("panel_id")

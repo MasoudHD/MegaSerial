@@ -394,6 +394,8 @@ class MainWindow(QMainWindow):
         self.panel_config_btn.clicked.connect(self.panel_view.configure)
         fb.addWidget(self.panel_view.scope_button)
         self.panel_view.scope_button.hide()
+        mode_row.insertWidget(2, self.panel_view.windows_button)
+        self.panel_view.windows_button.hide()
         fb.addWidget(self.filter_dir_combo)
         fb.addWidget(self.filter_ci_check)
         fb.addWidget(self.filter_status)
@@ -880,6 +882,7 @@ class MainWindow(QMainWindow):
         self.panel_view.workspace.active = index == 1
         self.presentation_stack.setCurrentIndex(index)
         self.panel_view.scope_button.setVisible(index == 1)
+        self.panel_view.windows_button.setVisible(index == 1)
         self.panel_config_btn.setVisible(index == 1)
         self.protocol_btn.setVisible(index == 1)
         self.split_check.setEnabled(index == 0)
