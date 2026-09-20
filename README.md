@@ -290,3 +290,9 @@ In Line mode, route UTF-8 lines with `@PANEL:32|payload` and update titles with
 IDs are assigned automatically by row and column (`32` = row 3, column 2);
 titles are optional. Layouts, titles, search scope and active presentation are saved in `.msproj`.
 See the [Panel View guide](docs/panel-view.md) for setup, search and export details.
+
+Panel View also supports a **zMonitor** protocol preset (binary frames, channel
+mapping, title/style commands and ANSI colors), plus configurable text and
+binary-delimited frame profiles. Click **Protocol: MegaSerial…** to choose a
+profile, test sample packets, or import/export profile JSON. See the
+[device protocol guide](docs/protocol-profiles.md).

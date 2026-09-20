@@ -1,6 +1,6 @@
 """Panel presentation and configuration, reusing the normal monitor renderer."""
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QTextCursor
+from PyQt6.QtGui import QTextCursor, QColor
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QMenu,
     QDialog, QDialogButtonBox, QSpinBox, QFormLayout, QTableWidget,
@@ -78,7 +78,8 @@ class PanelLayoutDialog(QDialog):
         state = self.workspace.to_dict()
         state.update(max_columns=self.columns.value(),
                      row_counts=[self.counts.cellWidget(i, 0).value() for i in range(self.counts.rowCount())],
-                     panels=[{"id": self.table.item(i, 1).text(), "title": self.table.item(i, 2).text()}
+                     panels=[{**next((p for p in self.workspace.panels if p["id"] == self.table.item(i, 1).text()), {}),
+                              "id": self.table.item(i, 1).text(), "title": self.table.item(i, 2).text()}
                              for i in range(self.table.rowCount())])
         try:
             self.result_workspace = PanelWorkspace(state)
@@ -165,10 +166,42 @@ class PanelView(QScrollArea):
         for ident, title in self.workspace.titles().items():
             self.widgets[ident].header.setText(f"{ident} — {title}")
             self.widgets[ident].header.setToolTip(f"{title}\nID: {ident}")
+            panel = next(p for p in self.workspace.panels if p["id"] == ident)
+            styles = []
+            for key, css in (("title_color", "color"), ("title_bg", "background-color")):
+                value = panel.get(key, "")
+                color = QColor(value if isinstance(value, str) else "")
+                if color.isValid():
+                    styles.append(f"{css}:{color.name()}")
+            self.widgets[ident].header.setStyleSheet(";".join(styles))
             action = self.scope_menu.addAction(f"{title} ({ident})")
             action.setCheckable(True)
             action.setChecked(self.workspace.in_scope(ident))
             action.triggered.connect(lambda checked, ident=ident: self._scope(ident, checked))
+
+    def apply_control(self, ev):
+        """Apply a decoded title/style command to its configured destination."""
+        panel = next((p for p in self.workspace.panels if p["id"] == ev.get("panel_id")), None)
+        if panel is None:
+            return
+        style = ev.get("panel_style", {})
+        if "title" in style:
+            self.workspace.update_title(panel["id"], style["title"])
+        for key, target in (("color", "title_color"), ("bg", "title_bg")):
+            if key not in style:
+                continue
+            value = style[key].strip()
+            color = QColor(value)
+            if not color.isValid():
+                parts = value.split(',')
+                if len(parts) == 3 and all(1 <= len(p.strip()) <= 3 and p.strip().isascii()
+                                         and p.strip().isdigit() and 0 <= int(p) <= 255 for p in parts):
+                    color = QColor(*(int(p) for p in parts))
+            if color.isValid():
+                panel[target] = color.name()
+            else:
+                ev["protocol_diagnostic"] = "Invalid title color"
+        self.refresh_titles()
 
     def _all_scope(self, checked):
         self.workspace.scope = None if checked else []
@@ -193,6 +226,8 @@ class PanelView(QScrollArea):
             widget.monitor.set_font_point_size(size)
 
     def append_event(self, ev, opts, predicate):
+        if ev.get("panel_control") and ev.get("panel_id") in self.widgets:
+            return
         event_key = id(ev)
         ev = panel_event(ev)
         if self.workspace.accepts(ev, predicate):

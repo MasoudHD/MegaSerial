@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
 from . import utils
 from .panel_protocol import panel_event
 from .panel_model import GENERAL
+from .ansi_text import ansi_html
 
 DISPLAY_FORMATS = ["ASCII", "HEX", "Binary", "Hexdump"]
 BYTES_PER_ROW = ["8", "16", "32", "64"]
@@ -143,14 +144,15 @@ def event_csv_row(ev: dict, index: int, prev_ts: datetime | None) -> list:
 
 def events_to_csv_rows(events, panel_titles: dict | None = None) -> list[list]:
     """Return the header row followed by one row per event."""
-    rows = [list(CSV_COLUMNS) + (["panel_id", "panel_title"] if panel_titles is not None else [])]
+    rows = [list(CSV_COLUMNS) + (["panel_id", "panel_title", "device_channel", "protocol", "protocol_diagnostic"] if panel_titles is not None else [])]
     prev_ts = None
     for index, ev in enumerate(events, start=1):
         row = event_csv_row(ev, index, prev_ts)
         if panel_titles is not None:
             ident = ev.get("panel_id") or GENERAL
             row[CSV_COLUMNS.index("text")] = _csv_text(panel_event(ev))
-            row.extend([ident, panel_titles.get(ident, "General" if ident == GENERAL else "")])
+            row.extend([ident, panel_titles.get(ident, "General" if ident == GENERAL else ""),
+                        ev.get("device_channel", ""), ev.get("protocol", ""), ev.get("protocol_diagnostic", "")])
         rows.append(row)
         if isinstance(ev.get("ts"), datetime):
             prev_ts = ev["ts"]
@@ -198,7 +200,9 @@ def render_html(ev: dict, fmt: str, bytes_per_row: int, opts: dict,
         # Drop carriage returns and the trailing newline so line-oriented text
         # (e.g. AT commands) shows as one clean line per entry.
         body = body.replace("\r", "").rstrip("\n")
-    body_html = html.escape(body).replace("\n", "<br>")
+    body_html = (ansi_html(ev["_panel_ansi_text"].replace("\r", "").rstrip("\n"))
+                 if opts.get("unicode_text") and "_panel_ansi_text" in ev
+                 else html.escape(body).replace("\n", "<br>"))
     return f'{prefix}<span style="color:{color}">{body_html}</span>'
 
 

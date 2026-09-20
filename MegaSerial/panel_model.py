@@ -1,5 +1,6 @@
 """Project-owned panel layout and routing. Contains no Qt or event storage."""
 from copy import deepcopy
+from .protocol_profiles import preset, validate_profile
 from .panel_protocol import valid_panel_id
 
 GENERAL = "11"
@@ -23,6 +24,7 @@ class PanelWorkspace:
         self.max_columns = 1
         self.row_counts = [1]
         self.panels = [{"id": GENERAL, "title": "General"}]
+        self.protocol_profile = preset()
         self.scope = None  # None means All, [] means no panels are filtered.
         if state is not None:
             self._load(state)
@@ -53,6 +55,10 @@ class PanelWorkspace:
         scope = state.get("scope")
         if scope is not None and (not isinstance(scope, list) or any(not isinstance(s, str) for s in scope)):
             raise ValueError("Invalid search scope")
+        try:
+            self.protocol_profile = validate_profile(state.get("protocol_profile", preset()))
+        except (ValueError, TypeError):
+            self.protocol_profile = preset()
         self.active = bool(state.get("active", False))
         self.max_columns, self.row_counts = columns, list(counts)
         self.panels = deepcopy(panels)
@@ -70,7 +76,8 @@ class PanelWorkspace:
     def to_dict(self):
         return {"schema_version": PANEL_SCHEMA_VERSION, "active": self.active, "rows": len(self.row_counts),
                 "max_columns": self.max_columns, "row_counts": list(self.row_counts),
-                "panels": deepcopy(self.panels), "scope": deepcopy(self.scope)}
+                "panels": deepcopy(self.panels), "scope": deepcopy(self.scope),
+                "protocol_profile": deepcopy(self.protocol_profile)}
 
     def destination(self, event):
         ident = event.get("panel_id")

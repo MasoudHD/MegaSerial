@@ -107,3 +107,20 @@ Panel workspace schema version 2 uses position IDs such as `32`. The pure
 `migrate_panel_project` helper upgrades earlier custom-ID workspace metadata,
 search scope and event routing during project load, preserving raw event bytes
 and recording changed IDs in `original_panel_id`. No additional event store is used.
+
+## Device protocol profiles
+
+The project-owned panel workspace optionally contains a versioned protocol
+profile. The default MegaSerial path retains the existing line assembly and
+parser. Selected zMonitor/custom profiles use `ProtocolDecoder` in
+`protocol_profiles.py` instead of that line assembler, after raw RX has already
+fed `RxMonitor`. This is alternate framing in the same RX/event pipeline, not a
+second serial reader or event store. The decoder retains only an incomplete
+packet; returned records preserve raw bytes and add channel/destination metadata.
+
+`protocol_dialog.py` validates profiles and provides channel mapping, import/export
+and an isolated preview. `ansi_text.py` supplies escaped SGR rendering and plain
+text projection. `PanelView` applies decoded title/style commands, while the
+shared event deque still retains their raw frames. `MainWindow` coordinates
+selection, bounded decoder flushing and event ingestion. No new runtime
+dependencies are introduced. See [protocol profiles](protocol-profiles.md).

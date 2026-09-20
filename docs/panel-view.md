@@ -114,3 +114,12 @@ rapid input and bounded retention. Before merge, verify on a desktop with a devi
 - Sustained rapid data across several panels, including the retention limit.
 
 Desktop/device checks and Windows behavior are not established by offscreen tests.
+
+## Other device formats
+
+**Protocol: MegaSerial…** selects the existing text protocol, a ready-made
+zMonitor preset, or guided custom text/frame profiles. Alternative profiles use
+their own packet boundaries rather than Line mode. The zMonitor preset supports
+channel mapping, title/style commands and ANSI colors. See the
+[protocol profile guide](protocol-profiles.md) for setup, preview, file sharing,
+metadata, export and framing limitations.

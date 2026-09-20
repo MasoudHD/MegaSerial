@@ -93,3 +93,9 @@ Panel View reuses monitor CSV export with additional `panel_id` and `panel_title
 columns. `text` is the panel payload; `data` remains raw serial bytes in hex.
 Normal Monitor CSV is unchanged. Text export groups displayed entries under panel
 headers. See [Panel View](panel-view.md) for scoped filtering and fallback rules.
+
+Device protocol profiles additionally append `device_channel`, `protocol`, and
+`protocol_diagnostic` to Panel CSV. The payload is plain text with ANSI SGR codes
+removed, while `data` retains original framed bytes in hex. Applied zMonitor
+control commands are retained in projects/normal-monitor exports but omitted
+from Panel View's visible-log export. See [protocol profiles](protocol-profiles.md).

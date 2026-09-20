@@ -33,6 +33,8 @@ from .monitor import (
     write_events_csv, DEFAULT_FONT_POINT_SIZE,
 )
 from .panel_protocol import PanelProtocolParser, panel_event
+from .protocol_profiles import ProtocolDecoder
+from .protocol_dialog import ProtocolDialog, PROFILE_LABELS
 from .panel_model import PanelWorkspace
 from .panel_view import PanelView
 from .graph_panel import GraphPanel
@@ -91,6 +93,7 @@ class MainWindow(QMainWindow):
         self._rx_buf = bytearray()
         self._rx_line_start = True
         self._panel_parser = PanelProtocolParser()
+        self._protocol_decoder = ProtocolDecoder()
         self._rx_flush_timer = QTimer(self)
         self._rx_flush_timer.setSingleShot(True)
         self._rx_flush_timer.timeout.connect(self._flush_rx_buffer)
@@ -360,6 +363,10 @@ class MainWindow(QMainWindow):
         self.panel_config_btn = QPushButton("Configure panels…")
         self.panel_config_btn.hide()
         mode_row.addWidget(self.panel_config_btn)
+        self.protocol_btn = QPushButton("Protocol: MegaSerial…")
+        self.protocol_btn.clicked.connect(self._configure_protocol)
+        self.protocol_btn.hide()
+        mode_row.addWidget(self.protocol_btn)
         mode_row.addStretch(1)
         v.addLayout(mode_row)
 
@@ -383,7 +390,7 @@ class MainWindow(QMainWindow):
         fb.addWidget(self.filter_check)
         fb.addWidget(self.filter_pattern, 1)
         self.panel_view = PanelView(self._monitor_font_pt, self.zoom_monitor)
-        self.panel_view.changed.connect(self._rerender_all)
+        self.panel_view.changed.connect(self._on_panel_workspace_changed)
         self.panel_config_btn.clicked.connect(self.panel_view.configure)
         fb.addWidget(self.panel_view.scope_button)
         self.panel_view.scope_button.hide()
@@ -874,12 +881,51 @@ class MainWindow(QMainWindow):
         self.presentation_stack.setCurrentIndex(index)
         self.panel_view.scope_button.setVisible(index == 1)
         self.panel_config_btn.setVisible(index == 1)
+        self.protocol_btn.setVisible(index == 1)
         self.split_check.setEnabled(index == 0)
         self._rerender_all()
 
+    def _configure_protocol(self):
+        dialog = ProtocolDialog(self.panel_view.workspace.protocol_profile,
+                                self.panel_view.workspace.titles(),
+                                latest_rx=lambda: next((e["data"] for e in reversed(self.events)
+                                                        if e.get("dir") == "rx" and "data" in e), b""),
+                                parent=self)
+        if dialog.exec():
+            state = self.panel_view.workspace.to_dict()
+            state["protocol_profile"] = dialog.result_profile
+            if dialog.result_profile["kind"] == "zmonitor" and dialog.layout_check.isChecked():
+                defaults = PanelWorkspace({"max_columns": 4, "row_counts": [4, 4, 4, 4]})
+                old = {p["id"]: p for p in state["panels"]}
+                state.update(max_columns=4, row_counts=[4, 4, 4, 4],
+                             panels=[old.get(p["id"], p) for p in defaults.panels])
+            self.panel_view.set_workspace(PanelWorkspace(state))
+
+    def _on_panel_workspace_changed(self):
+        profile = self.panel_view.workspace.protocol_profile
+        if profile != self._protocol_decoder.profile:
+            self._flush_rx_buffer(force=True)
+            self._rx_flush_timer.stop()
+            self._protocol_decoder = ProtocolDecoder(profile)
+            self._rx_line_start = True
+        self.protocol_btn.setText(f"Protocol: {PROFILE_LABELS[profile['kind']]}…")
+        self.linemode_check.setEnabled(profile["kind"] == "megaserial")
+        self._rerender_all()
+
+    def _append_protocol_packet(self, packet):
+        ev = {"type": "data", "dir": "rx", "ts": datetime.now(), **packet}
+        if ev.get("panel_control"):
+            self.panel_view.apply_control(ev)
+        if ev.get("panel_id") and ev["panel_id"] not in self.panel_view.widgets:
+            ev["protocol_diagnostic"] = "Destination panel is not configured; displayed in General"
+        if ev.get("protocol_diagnostic"):
+            self.protocol_btn.setToolTip(ev["protocol_diagnostic"])
+        self._emit_event(ev)
+
     def _panel_filtered_events(self):
         return (ev for ev in self.events
-                if self.panel_view.workspace.accepts(panel_event(ev), self._event_passes_filter))
+                if not (ev.get("panel_control") and ev.get("panel_id") in self.panel_view.widgets)
+                and self.panel_view.workspace.accepts(panel_event(ev), self._event_passes_filter))
 
     def _active_views(self) -> list:
         return self.views if self.split_check.isChecked() else [self.view1]
@@ -962,7 +1008,10 @@ class MainWindow(QMainWindow):
 
     def on_data_received(self, data: bytes) -> None:
         self.rx_monitor.feed(data)   # raw stream for sequence response matching
-        if self.linemode_check.isChecked():
+        if self._protocol_decoder.profile["kind"] != "megaserial":
+            for packet in self._protocol_decoder.feed(data):
+                self._append_protocol_packet(packet)
+        elif self.linemode_check.isChecked():
             self._ingest_rx_lines(data)
         else:
             self._append_data("rx", data)
@@ -988,6 +1037,11 @@ class MainWindow(QMainWindow):
 
     def _flush_rx_buffer(self, force=False) -> None:
         """Emit any buffered partial line (called on timeout or mode change)."""
+        if self._protocol_decoder.profile["kind"] != "megaserial":
+            if force:
+                for packet in self._protocol_decoder.flush():
+                    self._append_protocol_packet(packet)
+            return
         if not self._rx_buf:
             return
         line = bytes(self._rx_buf)
@@ -1048,6 +1102,7 @@ class MainWindow(QMainWindow):
         self._rx_buf.clear()
         self._rx_line_start = True
         self._rx_flush_timer.stop()
+        self._protocol_decoder = ProtocolDecoder(self.panel_view.workspace.protocol_profile)
         self.panel_view.clear()
         for view in self.views:
             view.clear()
@@ -1689,6 +1744,7 @@ class MainWindow(QMainWindow):
         self._rx_buf.clear()
         self._rx_line_start = True
         self.panel_view.set_workspace(PanelWorkspace.restore(loaded.get("panel_view")))
+        self._protocol_decoder = ProtocolDecoder(self.panel_view.workspace.protocol_profile)
         self.presentation_combo.setCurrentIndex(int(self.panel_view.workspace.active))
         self.cfg.update(settings)
         self.shortcuts = list(self.cfg.get("shortcuts", []))
