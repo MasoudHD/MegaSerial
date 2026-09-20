@@ -1,5 +1,6 @@
 """Strict, stateless parsing of complete UTF-8 panel protocol lines."""
 from dataclasses import dataclass
+from .ansi_text import plain_ansi
 
 
 def valid_panel_id(value: str) -> bool:
@@ -36,7 +37,10 @@ class PanelProtocolParser:
 def panel_event(ev: dict) -> dict:
     """A transient presentation projection; never modify retained raw bytes."""
     if "panel_payload" in ev:
-        return {**ev, "data": ev["panel_payload"].encode("utf-8")}
+        text = ev["panel_payload"]
+        if ev.get("panel_ansi"):
+            return {**ev, "data": plain_ansi(text).encode("utf-8"), "_panel_ansi_text": text}
+        return {**ev, "data": text.encode("utf-8")}
     if "panel_title" in ev:
         return {**ev, "data": ("Title: " + ev["panel_title"]).encode("utf-8")}
     return ev
