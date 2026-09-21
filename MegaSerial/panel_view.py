@@ -10,6 +10,7 @@ from .monitor import MonitorView
 from .panel_model import PanelWorkspace, MAX_ROWS, MAX_COLUMNS, default_title
 from .panel_protocol import panel_event
 from .panel_positions import position_id
+from .panel_settings import PanelSettingsDialog
 from .panel_drag import PanelHeader, PanelDropTarget
 from .panel_arrangement import positions, move_panel
 
@@ -135,6 +136,9 @@ class PanelWidget(PanelDropTarget):
             if head.itemAt(i).widget():
                 head.itemAt(i).widget().hide()
         layout.addWidget(self.monitor, 1)
+        self.monitor.edit.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.monitor.edit.customContextMenuRequested.connect(
+            lambda point: view.show_window_menu(panel["id"], self.monitor.edit, point))
 
 
 class PanelView(QScrollArea):
@@ -270,10 +274,23 @@ class PanelView(QScrollArea):
             visibility.triggered.connect(lambda checked, ident=ident: self.set_panel_visible(ident, checked))
 
     def show_arrangement_menu(self, header, point):
-        menu = QMenu(self)
+        self.show_window_menu(header.ident, header, point)
+
+    def show_window_menu(self, ident, widget, point):
+        menu = widget.createStandardContextMenu() if hasattr(widget, "createStandardContextMenu") else QMenu(self)
+        if menu.actions():
+            menu.addSeparator()
+        menu.addAction("Window settings…", lambda: self.configure_window(ident))
         menu.addAction("Reset arrangement", self.reset_arrangement)
-        menu.exec(header.mapToGlobal(point))
+        menu.exec(widget.mapToGlobal(point))
         menu.deleteLater()
+
+    def configure_window(self, ident):
+        dialog = PanelSettingsDialog(ident, self.workspace.titles()[ident],
+                                     self.workspace.capacities()[ident], self)
+        if dialog.exec():
+            self.workspace.set_capacity(ident, dialog.capacity.value())
+            self.changed.emit()
 
     def reset_arrangement(self):
         self.workspace.display_positions = {}
@@ -450,7 +467,7 @@ class PanelView(QScrollArea):
             self.previous[ident] = ev.get("ts")
 
     def forget_event(self, ev):
-        """Trim presentation blocks when the shared event deque evicts an entry.
+        """Trim presentation blocks when its destination queue evicts an entry.
 
         Only block counts and object identities are cached, never event data.
         """

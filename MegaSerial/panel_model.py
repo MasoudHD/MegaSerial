@@ -3,6 +3,7 @@ from copy import deepcopy
 from .protocol_profiles import preset, validate_profile
 from .panel_protocol import valid_panel_id
 from .panel_positions import position_id
+from .event_history import DEFAULT_CAPACITY, MAX_CAPACITY
 from .panel_arrangement import normalize_positions
 
 GENERAL = "11"
@@ -73,6 +74,9 @@ class PanelWorkspace:
         self.panels = deepcopy(panels)
         for panel in self.panels:
             panel["title"] = panel["title"] or default_title(panel["id"])
+            capacity = panel.get("capacity", DEFAULT_CAPACITY)
+            if type(capacity) is not int or not 1 <= capacity <= MAX_CAPACITY:
+                panel.pop("capacity", None)
         self.scope = None if scope is None else list(dict.fromkeys(s for s in scope if s in ids))
         def weights(key, allowed):
             values = state.get(key, {})
@@ -160,6 +164,18 @@ class PanelWorkspace:
             self.hidden_ids = [i for i in self.hidden_ids if i != ident]
         elif ident not in self.hidden_ids:
             self.hidden_ids.append(ident)
+
+    def capacities(self):
+        return {p["id"]: p.get("capacity", DEFAULT_CAPACITY) for p in self.panels}
+
+    def set_capacity(self, ident, capacity):
+        if type(capacity) is not int or not 1 <= capacity <= MAX_CAPACITY:
+            raise ValueError(f"Message capacity must be between 1 and {MAX_CAPACITY:,}")
+        for panel in self.panels:
+            if panel["id"] == ident:
+                panel["capacity"] = capacity
+                return
+        raise ValueError("Unknown panel")
 
     def destination(self, event):
         ident = event.get("panel_id")

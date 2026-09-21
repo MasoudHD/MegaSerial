@@ -40,7 +40,7 @@ This direction is generally sound below the `MainWindow` layer. The main archite
 
 1. At startup, `MainWindow` loads config, creates UI/state, then maps configuration into widgets.
 2. Connecting constructs `SerialConfig`, starts `SerialWorker`, and routes its signals to `MainWindow` handlers.
-3. RX bytes are added to `RxMonitor`, optionally assembled into text lines, then emitted as timestamped monitor events. Events are filtered/rendered, optionally graphed, and retained in a bounded `deque` of 6,000 entries.
+3. RX bytes are added to `RxMonitor`, optionally assembled into text lines, then emitted as timestamped monitor events. Events are filtered/rendered, optionally graphed, and retained by `EventHistory` with independent per-panel capacities (10,000 events each by default).
 4. A manual send, shortcut, or sequence parses user text with `utils`, appends a selected line ending, and writes to `SerialWorker`. Manual sends are echoed/logged and recorded in history; sequences log through their runner signal.
 5. Shutdown stops runners and serial I/O, collects state from controls/models, and writes the JSON config.
 
@@ -78,7 +78,7 @@ Do not create a generic controller, repository, interface, or model layer pre-em
 
 ## Panel View extension
 
-Panel View is an additive presentation of the shared monitor event deque:
+Panel View is an additive presentation of the chronological monitor event index:
 
 ```text
 SerialWorker → MainWindow.on_data_received → RxMonitor (unchanged raw bytes)
@@ -121,7 +121,7 @@ packet; returned records preserve raw bytes and add channel/destination metadata
 `protocol_dialog.py` validates profiles and provides channel mapping, import/export
 and an isolated preview. `ansi_text.py` supplies escaped SGR rendering and plain
 text projection. `PanelView` applies decoded title/style commands, while the
-shared event deque still retains their raw frames. `MainWindow` coordinates
+chronological event index still retains their raw frames. `MainWindow` coordinates
 selection, bounded decoder flushing and event ingestion. No new runtime
 dependencies are introduced. See [protocol profiles](protocol-profiles.md).
 
@@ -142,3 +142,10 @@ swapping and discovery placement), and `PanelView` (reparenting existing monitor
 Optional workspace `display_positions` separates display coordinates from routing
 IDs. Moving does not replay or mutate events. Empty cells are drop targets within
 the existing splitter layout; no dashboard framework or separate log store is used.
+
+`event_history.py` owns independent destination queues and a chronological index
+of the same event objects. `MainWindow` configures capacities from the workspace
+and trims the affected panel presentation on eviction. Project saving and panel
+export iterate the complete retained index; Normal Monitor remains a 6,000-event
+presentation. `panel_settings.py` provides the extensible per-window settings dialog.
+Capacity changes rebuild retention and replay views without altering serial I/O.

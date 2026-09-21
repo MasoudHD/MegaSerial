@@ -234,9 +234,9 @@ class PanelIntegrationTests(unittest.TestCase):
         self.assertEqual(len(self.window.panel_view.scope_menu.actions()), 10)
 
     def test_bounded_retention_clear_and_replay(self):
-        from collections import deque
         w = self.window
-        w.events = deque(maxlen=2)
+        w.panel_view.workspace.set_capacity("12", 1)
+        w._on_panel_workspace_changed()
         w.on_data_received(b'@PANEL:12|first\n@PANEL:12|second\n@PANEL:21|third\n')
         self.assertNotIn('first', self.text('12'))
         self.assertIn('second', self.text('12'))
@@ -291,10 +291,40 @@ class PanelIntegrationTests(unittest.TestCase):
         self.assertEqual(w.panel_view.widgets['12'].monitor.font_point_size, font_size)
         self.assertIn('first', self.text('12'))
 
-    def test_rapid_rx_and_multiline_retention(self):
-        from collections import deque
+    def test_window_capacity_settings_trim_only_selected_panel(self):
+        from unittest.mock import Mock
+        from MegaSerial.panel_settings import PanelSettingsDialog
         w = self.window
-        w.events = deque(maxlen=30)
+        w.on_data_received(b'@PANEL:12|old\n@PANEL:21|quiet\n@PANEL:12|new\n')
+        dialog = Mock()
+        dialog.exec.return_value = True
+        dialog.capacity.value.return_value = 1
+        with patch('MegaSerial.panel_view.PanelSettingsDialog', return_value=dialog):
+            w.panel_view.configure_window('12')
+        self.assertNotIn('old', self.text('12'))
+        self.assertIn('new', self.text('12'))
+        self.assertIn('quiet', self.text('21'))
+        self.assertEqual(len(w.events), 2)
+        dialog.exec.return_value = False
+        dialog.capacity.value.return_value = 100
+        with patch('MegaSerial.panel_view.PanelSettingsDialog', return_value=dialog):
+            w.panel_view.configure_window('12')
+        self.assertEqual(w.panel_view.workspace.capacities()['12'], 1)
+        w.panel_view.set_panel_visible('12', False)
+        w.on_data_received(b'@PANEL:12|hidden\n')
+        self.assertEqual([e['panel_payload'] for e in w.events], ['quiet', 'hidden'])
+        w.presentation_combo.setCurrentIndex(0)
+        w.presentation_combo.setCurrentIndex(1)
+        self.assertNotIn('new', self.text('12'))
+        actual = PanelSettingsDialog('12', 'GPS', 10000)
+        self.assertEqual(actual.capacity.value(), 10000)
+        actual.deleteLater()
+
+    def test_rapid_rx_and_multiline_retention(self):
+        w = self.window
+        w.panel_view.workspace.set_capacity("12", 15)
+        w.panel_view.workspace.set_capacity("21", 15)
+        w._on_panel_workspace_changed()
         w.on_data_received(b''.join(f'@PANEL:{"12" if i % 2 else "21"}|value={i}\n'.encode()
                                    for i in range(300)))
         self.assertEqual(len(w.events), 30)
@@ -306,7 +336,8 @@ class PanelIntegrationTests(unittest.TestCase):
         after = {ident: widget.monitor.plain_text() for ident, widget in w.panel_view.widgets.items()}
         self.assertEqual(before, after)
         w.clear_monitor()
-        w.events = deque(maxlen=2)
+        w.panel_view.workspace.set_capacity("11", 2)
+        w._on_panel_workspace_changed()
         w._append_data('tx', b'one\ntwo\nthree')
         w._append_data('tx', b'keep')
         w._append_data('tx', b'last')

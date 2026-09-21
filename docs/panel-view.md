@@ -69,6 +69,25 @@ session events. Projects save the mode, discovered IDs, visibility and previous
 manual layout in optional `automatic`, `seen_ids` and `manual_layout` fields;
 older projects default to manual mode. No extra event store is used.
 
+## Window settings and history depth
+
+Right-click a panel header or its log area and select **Window settings…**.
+**Message capacity** defaults to **10,000** for every panel, including General.
+Choose 1–1,000,000 messages. Larger settings use more memory; messages may contain
+multiple lines or large payloads, so this is not a byte limit.
+
+Each panel evicts only its own oldest messages when full, even when hidden or
+when Normal Monitor is selected. Search never changes retention. RX, TX, title
+commands and application log events count as events; unrouted TX/log data and
+unknown destinations consume General's capacity. Reducing a capacity immediately
+discards the excess oldest messages; increasing it cannot recover deleted data.
+
+Capacities are stored as optional `capacity` fields on project panel definitions.
+Old projects default to 10,000 per panel; the project format version stays 1.
+Moving panels preserves their capacity and history. Changing the configured
+routing IDs/layout reassigns retained events to their current destination and
+applies that destination's capacity (removed destinations fall back to General).
+
 ## Drag panels to rearrange
 
 Drag a panel's **header** onto another panel to swap their positions. Empty cells
@@ -145,11 +164,15 @@ search scope are preserved, configured event IDs are mapped to position IDs, and
 writes panel schema version 2; the overall project format remains version 1.
 Devices should use the new position IDs after migration.
 
-The existing shared event deque remains the only event store (6,000 entries).
+`EventHistory` retains events independently per destination panel (10,000 messages
+per panel by default). A chronological index references the same event objects for
+monitor replay, project saving and export; messages are not copied into a second
+log database. Normal Monitor displays/exports the most recent 6,000 retained
+events, while Panel View and project saving use all independently retained events.
 Parsed RX events retain original `data` bytes and gain `panel_id` plus either
 `panel_payload` or `panel_title`. Panel rendering creates temporary projections;
 normal rendering and graphing use the original event. A presentation-only cache
-tracks rendered block counts to trim panels when the shared deque evicts events.
+tracks rendered block counts to trim panels when the own destination queue evicts events.
 
 In Panel View, **Export CSV** uses the existing exporter and adds `panel_id` and
 `panel_title` columns. The `text` column contains the panel payload/title message;
@@ -198,8 +221,8 @@ toggles the highlighted entry without closing the menu. Other panels share the
 available row width, and completely hidden rows collapse. IDs never change when
 panels are hidden. The dropdown remains accessible when all panels are hidden.
 
-Hidden panels continue receiving and retaining data under the existing shared
-6,000-event limit. Showing a panel restores its retained content under the current
+Hidden panels continue receiving and retaining data under each panel's own
+configured message capacity. Showing a panel restores its retained content under the current
 search filter. Visibility is independent of the search-scope **Panels** menu and
 does not change routing or export contents. The Windows list follows title and
 layout changes. New positions are visible by default.

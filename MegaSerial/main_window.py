@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from copy import deepcopy
-from collections import deque
+from itertools import islice
 from datetime import datetime
 from pathlib import Path
 
@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
 )
 
 from . import config, theme, utils, sound, __app_name__, __version__
+from .event_history import EventHistory
 from .serial_worker import SerialWorker, SerialConfig, available_ports, port_hwid
 from .sequence import (
     Step, NamedSequence, SequenceRunner, SequenceGroupRunner, RxMonitor,
@@ -78,7 +79,7 @@ class MainWindow(QMainWindow):
             NamedSequence.from_dict(d) for d in self.cfg.get("sequence_groups", [])
         ]
         self.history: list[dict] = list(self.cfg.get("history", []))
-        self.events: deque = deque(maxlen=MAX_EVENTS)
+        self.events = EventHistory(recent_limit=MAX_EVENTS)
         self._filter_regex = None
         self._building_table = False
         self._building_group_table = False
@@ -909,6 +910,7 @@ class MainWindow(QMainWindow):
             self.panel_view.set_workspace(PanelWorkspace(state))
 
     def _on_panel_workspace_changed(self):
+        self.events.configure(self.panel_view.workspace.capacities())
         self.panel_config_btn.setEnabled(not self.panel_view.workspace.automatic)
         profile = self.panel_view.workspace.protocol_profile
         if profile != self._protocol_decoder.profile:
@@ -978,7 +980,8 @@ class MainWindow(QMainWindow):
             ev, self._filter_regex, self.filter_dir_combo.currentData() or "all")
 
     def _filtered_events(self):
-        return (ev for ev in self.events if self._event_passes_filter(ev))
+        return (ev for ev in reversed(list(islice(reversed(self.events), MAX_EVENTS)))
+                if self._event_passes_filter(ev))
 
     def _on_filter_changed(self, *_args) -> None:
         self._compile_filter()
@@ -1000,12 +1003,15 @@ class MainWindow(QMainWindow):
 
     def _emit_event(self, ev: dict) -> None:
         self.panel_view.observe_event(ev)
-        visible = list(self._filtered_events())
-        prev_ts = visible[-1]["ts"] if visible else None
-        evicted = self.events[0] if len(self.events) == self.events.maxlen else None
-        self.events.append(ev)
+        previous = next((event for event in islice(reversed(self.events), MAX_EVENTS)
+                         if self._event_passes_filter(event)), None)
+        prev_ts = previous["ts"] if previous else None
+        evicted = self.events.append(ev)
         opts = self._global_opts()
-        if self._event_passes_filter(ev):
+        if evicted is not None and self.events.evicted_recently and not self.panel_view.workspace.active:
+            for view in self._active_views():
+                view.rerender(self._filtered_events(), opts)
+        elif self._event_passes_filter(ev):
             for view in self._active_views():
                 view.append_event(ev, opts, prev_ts)
         if self.panel_view.workspace.active:
