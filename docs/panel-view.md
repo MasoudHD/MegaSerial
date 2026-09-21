@@ -127,7 +127,9 @@ metadata, export and framing limitations.
 ## Show or hide windows
 
 In Panel View, **Windows ▾** lists every configured panel by position ID and title.
-Uncheck a panel to hide it; check it to show it again. Other panels share the
+Uncheck a panel to hide it; check it to show it again. The menu stays open for
+multiple selections; click outside it or press Escape to close. Space or Enter
+toggles the highlighted entry without closing the menu. Other panels share the
 available row width, and completely hidden rows collapse. IDs never change when
 panels are hidden. The dropdown remains accessible when all panels are hidden.
 

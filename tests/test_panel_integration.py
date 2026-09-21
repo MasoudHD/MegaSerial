@@ -294,3 +294,26 @@ class PanelIntegrationTests(unittest.TestCase):
                 project_name='Legacy', settings={}, events=data['events'], panel_view=data['panel_view']))
             self.assertTrue(w.open_project(str(path)))
             self.assertTrue(all(not widget.isHidden() for widget in w.panel_view.widgets.values()))
+
+    def test_windows_menu_stays_open_for_multiple_mouse_and_keyboard_toggles(self):
+        from PyQt6.QtCore import QPoint, Qt
+        from PyQt6.QtTest import QTest
+        view = self.window.panel_view
+        menu = view.windows_menu
+        menu.popup(QPoint(100, 100))
+        _APP.processEvents()
+        actions = {a.data(): a for a in menu.actions()}
+        for ident in ('12', '21', '12'):
+            before = view.workspace.is_visible(ident)
+            QTest.mouseClick(menu, Qt.MouseButton.LeftButton,
+                             pos=menu.actionGeometry(actions[ident]).center())
+            self.assertTrue(menu.isVisible())
+            self.assertEqual(view.workspace.is_visible(ident), not before)
+        menu.setActiveAction(actions['21'])
+        for key in (Qt.Key.Key_Space, Qt.Key.Key_Return):
+            before = view.workspace.is_visible('21')
+            QTest.keyClick(menu, key)
+            self.assertTrue(menu.isVisible())
+            self.assertEqual(view.workspace.is_visible('21'), not before)
+        QTest.keyClick(menu, Qt.Key.Key_Escape)
+        self.assertFalse(menu.isVisible())

@@ -11,6 +11,28 @@ from .panel_model import PanelWorkspace, MAX_ROWS, MAX_COLUMNS, default_title
 from .panel_protocol import panel_event
 
 
+class WindowVisibilityMenu(QMenu):
+    """Toggle checkable entries without dismissing the window selector."""
+
+    def mouseReleaseEvent(self, event):
+        action = self.actionAt(event.position().toPoint())
+        if (event.button() == Qt.MouseButton.LeftButton and action is not None
+                and action.isEnabled() and action.isCheckable()):
+            action.trigger()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def keyPressEvent(self, event):
+        action = self.activeAction()
+        if (event.key() in (Qt.Key.Key_Space, Qt.Key.Key_Return, Qt.Key.Key_Enter)
+                and action is not None and action.isEnabled() and action.isCheckable()):
+            action.trigger()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+
 class PanelLayoutDialog(QDialog):
     def __init__(self, workspace, parent=None):
         super().__init__(parent)
@@ -124,7 +146,7 @@ class PanelView(QScrollArea):
         self.scope_button.setMenu(self.scope_menu)
         self.windows_button = QPushButton("Windows ▾")
         self.windows_button.setToolTip("Show or hide panels; hidden panels keep receiving data")
-        self.windows_menu = QMenu(self.windows_button)
+        self.windows_menu = WindowVisibilityMenu(self.windows_button)
         self.windows_button.setMenu(self.windows_menu)
         self.setWidgetResizable(True)
         self.rebuild()
