@@ -4,9 +4,9 @@ Choose **Panel View** above the shared filter to replace the normal monitor with
 independent log panels. **Configure panels…** edits rows, maximum columns, each
 row's panel count and optional titles. IDs are generated automatically from the
 one-based row and column: `11` is row 1, column 1; `32` is row 3, column 2.
-IDs are read-only and always visible in panel headers. Create the layout and send
+IDs are read-only and always visible in panel headers, even after a display move. Create the layout and send
 data immediately; titles and title commands are not required. Blank titles use
-`Panel <ID>`. General occupies the first cell (`11`) and also accepts routed data.
+`Panel <ID>`. General starts in the first cell (routing ID `11`) and also accepts routed data.
 Its title defaults to General and may be edited without affecting fallback routing.
 Rows initially share their width equally among their panels. Layouts support 1–10 rows
 and 1–10 columns. Changing row lengths preserves titles and data by position ID,
@@ -68,6 +68,30 @@ while Automatic is enabled. Enabling it also discovers destinations in retained
 session events. Projects save the mode, discovered IDs, visibility and previous
 manual layout in optional `automatic`, `seen_ids` and `manual_layout` fields;
 older projects default to manual mode. No extra event store is used.
+
+## Drag panels to rearrange
+
+Drag a panel's **header** onto another panel to swap their positions. Empty cells
+appear while dragging; drop into one to move there. The destination is highlighted.
+Hover near an edge of the panel viewport to scroll to distant cells. Press Escape
+or drop outside the view to cancel. Text selection and divider resizing still work.
+
+Routing IDs never change: moving `32` does not change where `@PANEL:32|...` data
+goes. Titles, content and monitor widgets move together. Manual mode allows cells
+within the configured row count and maximum columns, including unused cells in
+shorter rows. Automatic mode allows the full 10×10 range.
+
+After the first move in Automatic mode, new destinations fill free cells without
+moving existing panels. Hidden panels retain reserved positions; dropping into a
+reserved cell swaps with that hidden panel. Hiding a placed panel can leave a gap.
+Right-click any header and choose **Reset arrangement** to return to the default
+manual matrix or automatic compact order. Disabling Automatic restores the saved
+manual arrangement along with the manual layout.
+
+Projects persist optional `display_positions` mapping routing IDs to zero-based
+`[row, column]` display cells. Older projects use the default order. Layout changes
+prune invalid/removed positions and place remaining panels in available cells;
+events, protocol bytes and project format version are unchanged.
 
 ## Resize panels
 

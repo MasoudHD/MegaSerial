@@ -30,6 +30,74 @@ class PanelIntegrationTests(unittest.TestCase):
     def text(self, ident):
         return self.window.panel_view.widgets[ident].monitor.plain_text()
 
+    def test_header_drag_swap_empty_drop_and_reset(self):
+        from unittest.mock import Mock
+        from PyQt6.QtCore import QPointF, Qt
+        from PyQt6.QtGui import QMouseEvent
+        from MegaSerial.panel_drag import MIME
+        w = self.window
+        view = w.panel_view
+        w.resize(1200, 850)
+        w.show()
+        w.on_data_received(b'@PANEL:12|before move\n' * 80)
+        _APP.processEvents()
+        scrollbar = view.widgets['12'].monitor.edit.verticalScrollBar()
+        self.assertGreater(scrollbar.maximum(), 10)
+        scrollbar.setValue(10)
+        original = view.widgets['12'].monitor
+        stored = deepcopy(list(w.events))
+        header = view.widgets['12'].header
+        with patch('MegaSerial.panel_drag.QDrag') as factory:
+            drag = factory.return_value
+            def drop(_action):
+                self.assertTrue(view._dragging)
+                self.assertEqual(len(view.placeholders), 3)
+                event = Mock()
+                event.source.return_value = header
+                event.mimeData.return_value = drag.setMimeData.call_args.args[0]
+                self.assertEqual(bytes(event.mimeData().data(MIME)), b'12')
+                target = view.widgets['21']
+                target.dragEnterEvent(event)
+                self.assertTrue(target._highlight)
+                target.dropEvent(event)
+                self.assertFalse(target._highlight)
+                event.accept.assert_called()
+                return Qt.DropAction.MoveAction
+            drag.exec.side_effect = drop
+            header.mousePressEvent(QMouseEvent(QEvent.Type.MouseButtonPress, QPointF(1, 1),
+                QPointF(1, 1), Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton,
+                Qt.KeyboardModifier.NoModifier))
+            header.mouseMoveEvent(QMouseEvent(QEvent.Type.MouseMove, QPointF(50, 1),
+                QPointF(50, 1), Qt.MouseButton.NoButton, Qt.MouseButton.LeftButton,
+                Qt.KeyboardModifier.NoModifier))
+        self.assertFalse(view._dragging)
+        _APP.processEvents()
+        self.assertEqual(scrollbar.value(), 10)
+        self.assertEqual(view.widgets['12'].cell, [1, 0])
+        self.assertEqual(view.widgets['21'].cell, [0, 1])
+        self.assertIs(view.widgets['12'].monitor, original)
+        self.assertEqual(list(w.events), stored)
+        self.assertIn('before move', self.text('12'))
+        view.set_dragging(True)
+        empty = next(p for p in view.placeholders if p.cell == [1, 2])
+        event = Mock()
+        event.source.return_value = header
+        event.mimeData.return_value = drag.setMimeData.call_args.args[0]
+        empty.dropEvent(event)
+        view.set_dragging(False)
+        self.assertEqual(view.widgets['12'].cell, [1, 2])
+        w.on_data_received(b'@PANEL:12|after move\n')
+        self.assertIn('after move', self.text('12'))
+        view.set_panel_visible('12', False)
+        view.set_panel_visible('12', True)
+        self.assertEqual(view.widgets['12'].cell, [1, 2])
+        view.reset_arrangement()
+        self.assertEqual(view.widgets['12'].cell, [0, 1])
+        self.assertIs(view.widgets['12'].monitor, original)
+        event.source.return_value = None
+        view.widgets['21'].dropEvent(event)
+        event.ignore.assert_called()
+
     def test_automatic_panels_live_rx_filter_reflow_and_restore(self):
         from MegaSerial.panel_model import PanelWorkspace
         w = self.window

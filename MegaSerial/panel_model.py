@@ -3,6 +3,7 @@ from copy import deepcopy
 from .protocol_profiles import preset, validate_profile
 from .panel_protocol import valid_panel_id
 from .panel_positions import position_id
+from .panel_arrangement import normalize_positions
 
 GENERAL = "11"
 PANEL_SCHEMA_VERSION = 2
@@ -27,6 +28,7 @@ class PanelWorkspace:
         self.panels = [{"id": GENERAL, "title": "General"}]
         self.protocol_profile = preset()
         self.hidden_ids = []
+        self.display_positions = {}
         self.panel_widths = {}
         self.row_heights = {}
         self.automatic = False
@@ -79,6 +81,7 @@ class PanelWorkspace:
             return {k: v for k, v in values.items()
                     if k in allowed and type(v) is int and 1 <= v <= 100000}
 
+        self.display_positions = normalize_positions(state.get("display_positions"), self)
         self.panel_widths = weights("panel_widths", ids)
         self.row_heights = weights("row_heights", [str(i) for i in range(len(counts))])
         self.automatic = state.get("automatic") is True
@@ -108,7 +111,8 @@ class PanelWorkspace:
                 "hidden_ids": list(self.hidden_ids),
                 "panel_widths": dict(self.panel_widths), "row_heights": dict(self.row_heights),
                 "automatic": self.automatic, "seen_ids": list(self.seen_ids),
-                "manual_layout": deepcopy(self.manual_layout)}
+                "manual_layout": deepcopy(self.manual_layout),
+                "display_positions": deepcopy(self.display_positions)}
 
     def set_automatic(self, enabled):
         if enabled == self.automatic:
@@ -120,6 +124,7 @@ class PanelWorkspace:
             self.row_counts = [10] * 10
             self.panels = [old.get(i, {"id": i, "title": default_title(i)})
                            for i in position_ids(self.row_counts)]
+            self.display_positions = {}
             self.manual_layout = saved
             self.automatic = True
             self.seen_ids = [GENERAL]

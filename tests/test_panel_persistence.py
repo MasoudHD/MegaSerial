@@ -15,6 +15,8 @@ class PanelPersistenceTests(unittest.TestCase):
         w.panel_widths = {'11': 1300, '12': 700}
         w.row_heights = {'0': 1200, '1': 800}
         w.update_title('12', 'گیرنده')
+        from MegaSerial.panel_arrangement import move_panel
+        move_panel(w, '12', 1, 2)
         events = [{'type': 'data', 'dir': 'rx', 'ts': datetime.now(),
                    'data': b'@PANEL:12|OK\n', 'panel_id': '12', 'panel_payload': 'OK'},
                   {'type': 'data', 'dir': 'tx', 'data': b'AT'}]

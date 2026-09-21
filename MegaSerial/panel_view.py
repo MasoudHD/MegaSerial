@@ -1,5 +1,4 @@
 """Panel presentation and configuration, reusing the normal monitor renderer."""
-from math import ceil, sqrt
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QTextCursor, QColor
 from PyQt6.QtWidgets import (
@@ -11,6 +10,8 @@ from .monitor import MonitorView
 from .panel_model import PanelWorkspace, MAX_ROWS, MAX_COLUMNS, default_title
 from .panel_protocol import panel_event
 from .panel_positions import position_id
+from .panel_drag import PanelHeader, PanelDropTarget
+from .panel_arrangement import positions, move_panel
 
 
 class WindowVisibilityMenu(QMenu):
@@ -56,10 +57,10 @@ class PanelLayoutDialog(QDialog):
         self.counts.setHorizontalHeaderLabels(["Panels in row"])
         box.addWidget(self.counts)
         self.table = QTableWidget(0, 3)
-        self.table.setHorizontalHeaderLabels(["Position", "Panel ID", "Title (optional)"])
+        self.table.setHorizontalHeaderLabels(["Routing position", "Panel ID", "Title (optional)"])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         box.addWidget(self.table, 1)
-        box.addWidget(QLabel("IDs: row 3 / column 2 = 32; row 3 / column 10 = 3:10. General uses 11."))
+        box.addWidget(QLabel("Routing IDs: 32 or 3:10. Dragging changes display positions, not IDs. General uses 11."))
         self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)
@@ -113,16 +114,19 @@ class PanelLayoutDialog(QDialog):
         super().accept()
 
 
-class PanelWidget(QWidget):
-    def __init__(self, panel, font_size, on_zoom):
-        super().__init__()
+class PanelWidget(PanelDropTarget):
+    def __init__(self, panel, font_size, on_zoom, view):
+        super().__init__(view)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(3, 3, 3, 3)
-        self.header = QLabel()
+        self.header = PanelHeader(view, panel["id"])
         self.header.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.header.setTextFormat(Qt.TextFormat.PlainText)
         self.header.setText(panel["title"])
         self.header.setToolTip("ID: " + panel["id"])
+        self.header.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.header.customContextMenuRequested.connect(
+            lambda point: view.show_arrangement_menu(self.header, point))
         layout.addWidget(self.header)
         self.monitor = MonitorView(font_point_size=font_size, on_zoom_requested=on_zoom, max_blocks=0)
         # Keep the reusable monitor and hide only its format toolbar.
@@ -141,6 +145,8 @@ class PanelView(QScrollArea):
         self.workspace = PanelWorkspace()
         self.font_size, self.on_zoom = font_size, on_zoom
         self.widgets = {}
+        self._dragging = False
+        self._drag_cells = None
         self.previous = {}
         self.rendered_blocks = {}
         self.scope_button = QPushButton("Panels ▾")
@@ -190,12 +196,13 @@ class PanelView(QScrollArea):
         layout.addWidget(self.row_splitter, 1)
         idx = 0
         self.rows = []
+        self.placeholders = []
         for count in self.workspace.row_counts:
             row_widget = self._splitter(Qt.Orientation.Horizontal)
             row_ids = []
             for _ in range(count):
                 panel = self.workspace.panels[idx]
-                widget = PanelWidget(panel, self.font_size, self.on_zoom)
+                widget = PanelWidget(panel, self.font_size, self.on_zoom, self)
                 self.widgets[panel["id"]] = widget
                 row_widget.addWidget(widget)
                 row_widget.setStretchFactor(row_widget.count() - 1, 1)
@@ -228,7 +235,7 @@ class PanelView(QScrollArea):
     @staticmethod
     def _remember_sizes(splitter, ids, weights):
         # Keep hidden panels' proportions while resizing the visible siblings.
-        visible = [(ident, size) for ident, size in zip(ids, splitter.sizes()) if size > 0]
+        visible = [(ident, size) for ident, size in zip(ids, splitter.sizes()) if size > 0 and ident is not None]
         total = sum(size for _, size in visible)
         weight_total = sum(weights.get(ident, 1000) for ident, _ in visible)
         for ident, size in visible:
@@ -243,7 +250,7 @@ class PanelView(QScrollArea):
         all_action.triggered.connect(self._all_scope)
         for ident, title in self.workspace.titles().items():
             self.widgets[ident].header.setText(f"{ident} — {title}")
-            self.widgets[ident].header.setToolTip(f"{title}\nID: {ident}")
+            self.widgets[ident].header.setToolTip(f"{title}\nRouting ID: {ident}\nDrag the header to rearrange; right-click to reset")
             panel = next(p for p in self.workspace.panels if p["id"] == ident)
             styles = []
             for key, css in (("title_color", "color"), ("title_bg", "background-color")):
@@ -262,6 +269,32 @@ class PanelView(QScrollArea):
             visibility.setChecked(self.workspace.is_visible(ident))
             visibility.triggered.connect(lambda checked, ident=ident: self.set_panel_visible(ident, checked))
 
+    def show_arrangement_menu(self, header, point):
+        menu = QMenu(self)
+        menu.addAction("Reset arrangement", self.reset_arrangement)
+        menu.exec(header.mapToGlobal(point))
+        menu.deleteLater()
+
+    def reset_arrangement(self):
+        self.workspace.display_positions = {}
+        self._sync_visibility()
+
+    def set_dragging(self, dragging):
+        self._drag_cells = {i: list(cell) for i, cell in positions(self.workspace).items()} if dragging else None
+        self._dragging = dragging
+        self._sync_visibility()
+
+    def move_panel(self, ident, row, column):
+        previous = self.workspace.display_positions
+        if self._drag_cells is not None:
+            self.workspace.display_positions = {i: list(cell) for i, cell in self._drag_cells.items()}
+        if move_panel(self.workspace, ident, row, column):
+            # Defer reparenting until Qt has finished dispatching the drop.
+            self._arrange_timer.start()
+            return True
+        self.workspace.display_positions = previous
+        return False
+
     def set_panel_visible(self, ident, visible):
         if visible and self.workspace.automatic and ident not in self.workspace.seen_ids:
             self.workspace.seen_ids.append(ident)
@@ -272,10 +305,16 @@ class PanelView(QScrollArea):
 
     def _sync_visibility(self):
         self._arrange_timer.stop()
-        if self.workspace.automatic:
-            self._arrange_automatic()
+        if self.workspace.automatic or self.workspace.display_positions or self._dragging:
+            self._arrange_positions()
             return
+        cells = positions(self.workspace)
+        # Restore the original rows after resetting a custom arrangement.
+        self._reparent_groups([[p["id"] for p in self.workspace.panels][sum(self.workspace.row_counts[:r]):
+                               sum(self.workspace.row_counts[:r + 1])]
+                              for r in range(len(self.workspace.row_counts))])
         for ident, widget in self.widgets.items():
+            widget.cell = cells[ident]
             widget.setVisible(self.workspace.is_visible(ident))
         for row, ids in self.rows:
             row.setVisible(any(self.workspace.is_visible(ident) for ident in ids))
@@ -287,23 +326,58 @@ class PanelView(QScrollArea):
         self.row_splitter.setSizes([self.workspace.row_heights.get(str(i), 1000)
                                    for i in range(len(self.rows))])
 
-    def _arrange_automatic(self):
-        ids = [i for i in self.widgets if self.workspace.is_visible(i)]
-        columns = min(10, max(1, ceil(sqrt(len(ids)))))
-        groups = [ids[i:i + columns] for i in range(0, len(ids), columns)]
+    def _arrange_positions(self):
+        cells = self._drag_cells if self._drag_cells is not None else positions(self.workspace)
+        shown = {tuple(cell): ident for ident, cell in cells.items()
+                 if self.workspace.is_visible(ident)}
+        rows = len(self.workspace.row_counts) if self._dragging else max((r + 1 for r, c in shown), default=0)
+        groups = []
+        for r in range(rows):
+            columns = self.workspace.max_columns if self._dragging else max(
+                (c + 1 for rr, c in shown if rr == r), default=1)
+            groups.append([shown.get((r, c)) for c in range(columns)])
+        self._reparent_groups(groups)
+        for ident, widget in self.widgets.items():
+            widget.cell = cells.get(ident)
+            widget.setVisible(self.workspace.is_visible(ident) and ident in cells)
+        for row, group in self.rows:
+            row.setSizes([self.workspace.panel_widths.get(i, 1000) for i in group])
+        self.row_splitter.setVisible(bool(shown) or self._dragging)
+        self.empty_label.setVisible(not shown and not self._dragging)
+        self.row_splitter.setSizes([self.workspace.row_heights.get(str(i), 1000)
+                                   for i in range(len(self.rows))])
+        for action in self.windows_menu.actions():
+            if action.isCheckable():
+                action.setChecked(self.workspace.is_visible(action.data()))
+
+    def _reparent_groups(self, groups):
         if groups != [row_ids for _, row_ids in self.rows]:
             # Reparent existing monitors: preserve their content and scroll position.
             for widget in self.widgets.values():
                 widget.hide()
                 widget.setParent(self.widget())
+            for placeholder in self.placeholders:
+                placeholder.deleteLater()
+            self.placeholders = []
             for row, _ in self.rows:
                 row.setParent(None)
                 row.deleteLater()
             self.rows = []
-            for group in groups:
+            for r, group in enumerate(groups):
                 row = self._splitter(Qt.Orientation.Horizontal)
-                for ident in group:
-                    row.addWidget(self.widgets[ident])
+                for c, ident in enumerate(group):
+                    if ident is None:
+                        target = PanelDropTarget(self)
+                        target.cell = [r, c]
+                        box = QVBoxLayout(target)
+                        label = QLabel(f"Drop here ({r + 1}, {c + 1})")
+                        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                        box.addWidget(label)
+                        self.placeholders.append(target)
+                        row.addWidget(target)
+                    else:
+                        row.addWidget(self.widgets[ident])
+                    row.setStretchFactor(row.count() - 1, 1)
                 row.splitterMoved.connect(
                     lambda _pos, _index, splitter=row, ids=group:
                     self._remember_sizes(splitter, ids, self.workspace.panel_widths))
@@ -311,16 +385,6 @@ class PanelView(QScrollArea):
                 self.row_splitter.setStretchFactor(self.row_splitter.count() - 1, 1)
                 row.show()
                 self.rows.append((row, group))
-        for ident, widget in self.widgets.items():
-            widget.setVisible(ident in ids)
-        for row, group in self.rows:
-            row.setSizes([self.workspace.panel_widths.get(i, 1000) for i in group])
-        self.row_splitter.setVisible(bool(ids))
-        self.empty_label.setVisible(not ids)
-        self.row_splitter.setSizes([self.workspace.row_heights.get(str(i), 1000)
-                                   for i in range(len(self.rows))])
-        for action in self.windows_menu.actions():
-            action.setChecked(self.workspace.is_visible(action.data()))
 
     def observe_event(self, event):
         if self.workspace.observe(event) and not self._arrange_timer.isActive():

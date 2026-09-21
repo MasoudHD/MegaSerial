@@ -135,3 +135,10 @@ project state. `MainWindow` passes events to discovery before display filtering;
 `PanelView` compacts existing monitor widgets into splitters without recreating
 content or adding event storage. Protocol mapping validation shares the position
 ID rules, including colon-separated coordinates when either coordinate is 10.
+
+Panel drag-and-drop is confined to `panel_drag.py` (header gestures, same-view
+validation and drop highlighting), `panel_arrangement.py` (bounded placement,
+swapping and discovery placement), and `PanelView` (reparenting existing monitors).
+Optional workspace `display_positions` separates display coordinates from routing
+IDs. Moving does not replay or mutate events. Empty cells are drop targets within
+the existing splitter layout; no dashboard framework or separate log store is used.
