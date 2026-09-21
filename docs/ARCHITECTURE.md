@@ -128,3 +128,10 @@ dependencies are introduced. See [protocol profiles](protocol-profiles.md).
 Panel View uses a vertical `QSplitter` for rows and a horizontal `QSplitter`
 within each row. Dragged proportions live in optional `PanelWorkspace` fields
 and use the existing project serialization path; resizing does not alter events.
+
+Automatic panels use the same 100 bounded position IDs from `panel_positions.py`.
+`PanelWorkspace` tracks discovered IDs and a manual-layout snapshot as optional
+project state. `MainWindow` passes events to discovery before display filtering;
+`PanelView` compacts existing monitor widgets into splitters without recreating
+content or adding event storage. Protocol mapping validation shares the position
+ID rules, including colon-separated coordinates when either coordinate is 10.

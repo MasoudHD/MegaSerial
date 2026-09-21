@@ -1,14 +1,16 @@
 """Panel presentation and configuration, reusing the normal monitor renderer."""
-from PyQt6.QtCore import Qt, pyqtSignal
+from math import ceil, sqrt
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QTextCursor, QColor
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QMenu,
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QMenu, QCheckBox,
     QDialog, QDialogButtonBox, QSpinBox, QFormLayout, QTableWidget,
     QTableWidgetItem, QHeaderView, QMessageBox, QScrollArea, QSizePolicy, QSplitter,
 )
 from .monitor import MonitorView
 from .panel_model import PanelWorkspace, MAX_ROWS, MAX_COLUMNS, default_title
 from .panel_protocol import panel_event
+from .panel_positions import position_id
 
 
 class WindowVisibilityMenu(QMenu):
@@ -57,7 +59,7 @@ class PanelLayoutDialog(QDialog):
         self.table.setHorizontalHeaderLabels(["Position", "Panel ID", "Title (optional)"])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         box.addWidget(self.table, 1)
-        box.addWidget(QLabel("IDs are automatic: row 3, column 2 is 32. Titles are optional. General uses cell 11."))
+        box.addWidget(QLabel("IDs: row 3 / column 2 = 32; row 3 / column 10 = 3:10. General uses 11."))
         self.buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)
@@ -87,7 +89,7 @@ class PanelLayoutDialog(QDialog):
         idx = 0
         for row, count in enumerate(counts):
             for col in range(count):
-                ident = f"{row + 1}{col + 1}"
+                ident = position_id(row + 1, col + 1)
                 title = titles.get(ident, default_title(ident))
                 for column, text in enumerate((f"{row + 1} / {col + 1}", ident, title)):
                     item = QTableWidgetItem(text)
@@ -148,8 +150,19 @@ class PanelView(QScrollArea):
         self.windows_button.setToolTip("Show or hide panels; hidden panels keep receiving data")
         self.windows_menu = WindowVisibilityMenu(self.windows_button)
         self.windows_button.setMenu(self.windows_menu)
+        self.auto_check = QCheckBox("Automatic panels")
+        self.auto_check.setToolTip("Reveal panels as data arrives, up to 10×10; keep routing IDs stable")
+        self.auto_check.toggled.connect(self._automatic_toggled)
+        self._arrange_timer = QTimer(self)
+        self._arrange_timer.setSingleShot(True)
+        self._arrange_timer.setInterval(0)
+        self._arrange_timer.timeout.connect(self._sync_visibility)
         self.setWidgetResizable(True)
         self.rebuild()
+
+    def _automatic_toggled(self, enabled):
+        self.workspace.set_automatic(enabled)
+        self.set_workspace(self.workspace)
 
     def configure(self):
         dialog = PanelLayoutDialog(self.workspace, self)
@@ -158,6 +171,9 @@ class PanelView(QScrollArea):
 
     def set_workspace(self, workspace):
         self.workspace = workspace
+        self.auto_check.blockSignals(True)
+        self.auto_check.setChecked(workspace.automatic)
+        self.auto_check.blockSignals(False)
         self.rebuild()
         self.changed.emit()
 
@@ -247,12 +263,18 @@ class PanelView(QScrollArea):
             visibility.triggered.connect(lambda checked, ident=ident: self.set_panel_visible(ident, checked))
 
     def set_panel_visible(self, ident, visible):
+        if visible and self.workspace.automatic and ident not in self.workspace.seen_ids:
+            self.workspace.seen_ids.append(ident)
         self.workspace.set_visible(ident, visible)
         self._sync_visibility()
         for action in self.windows_menu.actions():
             action.setChecked(self.workspace.is_visible(action.data()))
 
     def _sync_visibility(self):
+        self._arrange_timer.stop()
+        if self.workspace.automatic:
+            self._arrange_automatic()
+            return
         for ident, widget in self.widgets.items():
             widget.setVisible(self.workspace.is_visible(ident))
         for row, ids in self.rows:
@@ -264,6 +286,45 @@ class PanelView(QScrollArea):
             row.setSizes([self.workspace.panel_widths.get(ident, 1000) for ident in ids])
         self.row_splitter.setSizes([self.workspace.row_heights.get(str(i), 1000)
                                    for i in range(len(self.rows))])
+
+    def _arrange_automatic(self):
+        ids = [i for i in self.widgets if self.workspace.is_visible(i)]
+        columns = min(10, max(1, ceil(sqrt(len(ids)))))
+        groups = [ids[i:i + columns] for i in range(0, len(ids), columns)]
+        if groups != [row_ids for _, row_ids in self.rows]:
+            # Reparent existing monitors: preserve their content and scroll position.
+            for widget in self.widgets.values():
+                widget.hide()
+                widget.setParent(self.widget())
+            for row, _ in self.rows:
+                row.setParent(None)
+                row.deleteLater()
+            self.rows = []
+            for group in groups:
+                row = self._splitter(Qt.Orientation.Horizontal)
+                for ident in group:
+                    row.addWidget(self.widgets[ident])
+                row.splitterMoved.connect(
+                    lambda _pos, _index, splitter=row, ids=group:
+                    self._remember_sizes(splitter, ids, self.workspace.panel_widths))
+                self.row_splitter.addWidget(row)
+                self.row_splitter.setStretchFactor(self.row_splitter.count() - 1, 1)
+                row.show()
+                self.rows.append((row, group))
+        for ident, widget in self.widgets.items():
+            widget.setVisible(ident in ids)
+        for row, group in self.rows:
+            row.setSizes([self.workspace.panel_widths.get(i, 1000) for i in group])
+        self.row_splitter.setVisible(bool(ids))
+        self.empty_label.setVisible(not ids)
+        self.row_splitter.setSizes([self.workspace.row_heights.get(str(i), 1000)
+                                   for i in range(len(self.rows))])
+        for action in self.windows_menu.actions():
+            action.setChecked(self.workspace.is_visible(action.data()))
+
+    def observe_event(self, event):
+        if self.workspace.observe(event) and not self._arrange_timer.isActive():
+            self._arrange_timer.start()
 
     def apply_control(self, ev):
         """Apply a decoded title/style command to its configured destination."""
@@ -344,10 +405,19 @@ class PanelView(QScrollArea):
                                 QTextCursor.MoveMode.KeepAnchor, count)
             cursor.removeSelectedText()
 
+    def reset_discovery(self):
+        if self.workspace.automatic:
+            self.workspace.seen_ids = ["11"]
+            self._sync_visibility()
+
     def rerender(self, events, opts, predicate):
         self.clear()
+        discovered = False
         for ev in events:
+            discovered = self.workspace.observe(ev) or discovered
             self.append_event(ev, opts, predicate)
+        if discovered:
+            self._sync_visibility()
 
     def clear(self):
         self.previous.clear()

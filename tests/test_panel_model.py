@@ -79,3 +79,38 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(PanelWorkspace(state).hidden_ids, [])
         self.assertEqual(workspace().hidden_ids, [])
         self.assertEqual(PanelWorkspace({**state, 'hidden_ids': 'invalid'}).hidden_ids, [])
+
+    def test_automatic_discovery_and_manual_restore(self):
+        w = workspace()
+        w.panel_widths = {'11': 1200, '12': 800}
+        w.set_visible('21', False)
+        manual = w.to_dict()
+        w.set_automatic(True)
+        self.assertEqual(w.row_counts, [10] * 10)
+        self.assertEqual(len(set(w.titles())), 100)
+        self.assertEqual([i for i in w.titles() if w.is_visible(i)], ['11'])
+        ev = {'type': 'data', 'dir': 'rx', 'panel_id': '10:2', 'data': b'raw'}
+        before = deepcopy(ev)
+        self.assertTrue(w.observe(ev))
+        self.assertFalse(w.observe(ev))
+        self.assertTrue(w.is_visible('10:2'))
+        self.assertEqual(w.destination({'panel_id': '3:10'}), '3:10')
+        self.assertEqual(w.destination({'panel_id': '1010'}), '11')
+        self.assertEqual(ev, before)
+        self.assertEqual(PanelWorkspace.restore(w.to_dict()).to_dict(), w.to_dict())
+        w.set_automatic(False)
+        self.assertEqual(w.to_dict(), manual)
+
+    def test_automatic_hidden_panels_and_invalid_state(self):
+        w = workspace()
+        w.set_automatic(True)
+        w.observe({'type': 'data', 'panel_id': '32'})
+        w.set_visible('32', False)
+        w.observe({'type': 'data', 'panel_id': '32'})
+        self.assertFalse(w.is_visible('32'))
+        self.assertFalse(w.observe({'type': 'log', 'panel_id': '99'}))
+        self.assertFalse(w.is_visible('99'))
+        w.observe({'type': 'data', 'panel_id': 'unknown'})
+        self.assertTrue(w.is_visible('11'))
+        restored = PanelWorkspace.restore({**w.to_dict(), 'seen_ids': 7})
+        self.assertTrue(restored.is_visible('11'))

@@ -71,7 +71,9 @@ Choose **Custom text line** and specify:
 
 For example, prefix `$`, separator `:`, ending `0D 0A`, and mapping `gps → 32`
 accepts `$gps:Hello:world\r\n` and displays `Hello:world` in panel 32. Position
-channels such as `32` route directly to that position unless explicitly remapped.
+channels such as `32`, `3:10` and `10:2` route directly to that position unless
+explicitly remapped. Mappings support all 100 positions in the 10×10 matrix.
+Enable **Automatic panels** to reveal mapped destinations as packets arrive.
 Custom profiles do not interpret MegaSerial or zMonitor title commands.
 
 ## Custom delimited frame

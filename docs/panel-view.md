@@ -8,8 +8,8 @@ IDs are read-only and always visible in panel headers. Create the layout and sen
 data immediately; titles and title commands are not required. Blank titles use
 `Panel <ID>`. General occupies the first cell (`11`) and also accepts routed data.
 Its title defaults to General and may be edited without affecting fallback routing.
-Rows initially share their width equally among their panels. Layouts support 1–8 rows
-and 1–8 columns. Changing row lengths preserves titles and data by position ID,
+Rows initially share their width equally among their panels. Layouts support 1–10 rows
+and 1–10 columns. Changing row lengths preserves titles and data by position ID,
 not by flattened panel order. Removed positions fall back to cell 11; restoring
 a position displays its retained events again.
 
@@ -21,7 +21,8 @@ Enable **Line mode** for routing. Send strict UTF-8 lines terminated by LF or CR
 @PANEL_TITLE:32|GPS Receiver
 ```
 
-Configured IDs are numeric strings derived from matrix positions. The parser
+Configured IDs derive from matrix positions. Single-digit coordinates use `32`;
+when either coordinate is 10, use `3:10`, `10:2` or `10:10`. The parser
 still accepts other string IDs, which fall back to General. Unicode payloads
 and titles are supported. The first `|` separates the ID
 from the payload; subsequent pipes and empty payloads are preserved. Invalid
@@ -36,6 +37,37 @@ the remainder of that logical line is not interpreted. Changing line mode or
 closing the serial connection flushes incomplete commands as ordinary data.
 Clearing the monitor also clears pending input. A still-pending incomplete line
 is not yet a stored event and is not included in project/export output.
+
+## Automatic panels
+
+Enable **Automatic panels** in Panel View to make all 100 positions in a 10×10
+matrix available without configuring a layout. Only General is initially shown.
+Incoming data reveals its destination, and visible panels pack into a compact grid
+in matrix order. IDs stay fixed even when a panel moves on screen. For example:
+
+```text
+@PANEL:32|GPS data
+@PANEL:3:10|Column ten
+@PANEL:10:2|Row ten
+@PANEL:10:10|Last position
+```
+
+Title commands also reveal their destination. Discovery happens before search
+filtering, so a filtered message still activates its panel. Normal RX, TX and
+unknown IDs use General. All supported protocol profiles use the same discovery;
+custom channel mappings can target any of the 100 positions.
+
+Active panels remain available when a channel becomes quiet. **Clear** resets
+discovery to General. **Windows** can hide a panel without new data forcing it
+back open, or reveal an unused panel manually. Draggable dividers still work;
+the grid rearranges when the visible panel set changes.
+
+Disabling Automatic restores the previous manual layout and visibility, retaining
+updated titles and the current protocol. Manual layout configuration is disabled
+while Automatic is enabled. Enabling it also discovers destinations in retained
+session events. Projects save the mode, discovered IDs, visibility and previous
+manual layout in optional `automatic`, `seen_ids` and `manual_layout` fields;
+older projects default to manual mode. No extra event store is used.
 
 ## Resize panels
 

@@ -30,6 +30,46 @@ class PanelIntegrationTests(unittest.TestCase):
     def text(self, ident):
         return self.window.panel_view.widgets[ident].monitor.plain_text()
 
+    def test_automatic_panels_live_rx_filter_reflow_and_restore(self):
+        from MegaSerial.panel_model import PanelWorkspace
+        w = self.window
+        view = w.panel_view
+        view.auto_check.setChecked(True)
+        self.assertTrue(view.workspace.automatic)
+        self.assertFalse(w.panel_config_btn.isEnabled())
+        self.assertEqual([ids for _, ids in view.rows], [['11']])
+        original = view.widgets['11'].monitor
+        w.on_data_received(b'@PANEL:32|one\n@PANEL:10:2|two\n@PANEL_TITLE:3:10|Ten\n')
+        self.assertIn('one', self.text('32'))
+        self.assertIn('two', self.text('10:2'))
+        self.assertEqual(view.workspace.titles()['3:10'], 'Ten')
+        _APP.processEvents()
+        self.assertEqual(len(view.rows), 2)
+        self.assertIs(view.widgets['11'].monitor, original)
+        w.filter_pattern.setText('absent')
+        w.filter_check.setChecked(True)
+        w.on_data_received(b'@PANEL:99|filtered\n')
+        self.assertTrue(view.workspace.is_visible('99'))
+        self.assertEqual(self.text('99'), '')
+        view.set_panel_visible('32', False)
+        w.on_data_received(b'@PANEL:32|still hidden\n')
+        self.assertTrue(view.widgets['32'].isHidden())
+        for ident in view.widgets:
+            w.on_data_received(f'@PANEL:{ident}|burst\n'.encode())
+        self.assertEqual(len(view.workspace.seen_ids), 100)
+        self.assertTrue(view.widgets['32'].isHidden())
+        events = deepcopy(list(w.events))
+        view.set_workspace(PanelWorkspace.restore(view.workspace.to_dict()))
+        self.assertTrue(view.auto_check.isChecked())
+        self.assertTrue(view.workspace.is_visible('10:2'))
+        view.auto_check.setChecked(False)
+        self.assertEqual(view.workspace.row_counts, [2, 1])
+        self.assertEqual(list(w.events), events)
+        self.assertTrue(w.panel_config_btn.isEnabled())
+        view.auto_check.setChecked(True)
+        w.clear_monitor()
+        self.assertEqual([ids for _, ids in view.rows], [['11']])
+
     def test_resize_panels_rows_and_restore_proportions(self):
         from MegaSerial.panel_model import PanelWorkspace
         w = self.window

@@ -3,6 +3,15 @@ from MegaSerial.protocol_profiles import ProtocolDecoder, preset, validate_profi
 
 
 class DecoderTests(unittest.TestCase):
+    def test_ten_by_ten_positions_and_mapping(self):
+        p = {**preset('text'), 'mapping': {'gps': '10:10'}}
+        d = ProtocolDecoder(p)
+        for channel, ident in [('gps', '10:10'), ('3:10', '3:10'), ('99', '99'), ('32', '32')]:
+            self.assertEqual(d.feed(f'@PANEL:{channel}|OK\n'.encode())[0]['panel_id'], ident)
+        for bad in ['11:1', '0:10', '1010']:
+            with self.assertRaises(ValueError):
+                validate_profile({**p, 'mapping': {'gps': bad}})
+
     def test_zmonitor_all_channels_and_every_chunk_boundary(self):
         for channel in range(16):
             raw = bytes([0xc8, 0xc9 + channel]) + 'سلام|OK\nnext'.encode() + b'\xfa'

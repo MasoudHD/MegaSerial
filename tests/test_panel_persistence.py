@@ -29,6 +29,20 @@ class PanelPersistenceTests(unittest.TestCase):
         self.assertEqual(loaded['events'], events)
         self.assertEqual(w.destination(loaded['events'][1]), '11')
 
+    def test_automatic_project_roundtrip(self):
+        w = workspace()
+        w.set_automatic(True)
+        w.observe({'type': 'data', 'panel_id': '10:10'})
+        data = project.collect_project_data(project_name='Auto', settings={}, events=[],
+                                            panel_view=w.to_dict())
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'auto.msproj'
+            project.save_project(path, data)
+            restored = PanelWorkspace.restore(project.load_project(path)['panel_view'])
+        self.assertEqual(restored.to_dict(), w.to_dict())
+        restored.set_automatic(False)
+        self.assertEqual(restored.row_counts, [2, 1])
+
     def test_old_project_and_old_event(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / 'old.msproj'

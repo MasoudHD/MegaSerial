@@ -2,15 +2,16 @@
 from copy import deepcopy
 from .protocol_profiles import preset, validate_profile
 from .panel_protocol import valid_panel_id
+from .panel_positions import position_id
 
 GENERAL = "11"
 PANEL_SCHEMA_VERSION = 2
-MAX_ROWS = 8
-MAX_COLUMNS = 8
+MAX_ROWS = 10
+MAX_COLUMNS = 10
 
 
 def position_ids(row_counts):
-    return [f"{row}{column}" for row, count in enumerate(row_counts, 1)
+    return [position_id(row, column) for row, count in enumerate(row_counts, 1)
             for column in range(1, count + 1)]
 
 
@@ -28,6 +29,9 @@ class PanelWorkspace:
         self.hidden_ids = []
         self.panel_widths = {}
         self.row_heights = {}
+        self.automatic = False
+        self.seen_ids = []
+        self.manual_layout = None
         self.scope = None  # None means All, [] means no panels are filtered.
         if state is not None:
             self._load(state)
@@ -38,10 +42,10 @@ class PanelWorkspace:
         columns = state.get("max_columns", 1)
         counts = state.get("row_counts", [1])
         if type(columns) is not int or not 1 <= columns <= MAX_COLUMNS:
-            raise ValueError("Maximum columns must be between 1 and 8")
+            raise ValueError("Maximum columns must be between 1 and 10")
         if (not isinstance(counts, list) or not 1 <= len(counts) <= MAX_ROWS
                 or any(type(n) is not int or not 1 <= n <= columns for n in counts)):
-            raise ValueError("Each row must contain 1..maximum columns panels (up to 8 rows)")
+            raise ValueError("Each row must contain 1..maximum columns panels (up to 10 rows)")
         expected_ids = position_ids(counts)
         panels = state.get("panels", [{"id": ident, "title": default_title(ident)}
                                       for ident in expected_ids])
@@ -77,6 +81,15 @@ class PanelWorkspace:
 
         self.panel_widths = weights("panel_widths", ids)
         self.row_heights = weights("row_heights", [str(i) for i in range(len(counts))])
+        self.automatic = state.get("automatic") is True
+        seen = state.get("seen_ids", [])
+        self.seen_ids = [i for i in ids if i in seen] if isinstance(seen, list) else []
+        manual = state.get("manual_layout")
+        if self.automatic and isinstance(manual, dict):
+            manual = {**manual, "automatic": False, "manual_layout": None}
+            self.manual_layout = PanelWorkspace.restore(manual).to_dict()
+        if self.automatic and counts != [10] * 10:
+            self.automatic = False
         hidden = state.get("hidden_ids", [])
         self.hidden_ids = [ident for ident in ids if ident in hidden] if isinstance(hidden, list) else []
 
@@ -93,10 +106,47 @@ class PanelWorkspace:
                 "panels": deepcopy(self.panels), "scope": deepcopy(self.scope),
                 "protocol_profile": deepcopy(self.protocol_profile),
                 "hidden_ids": list(self.hidden_ids),
-                "panel_widths": dict(self.panel_widths), "row_heights": dict(self.row_heights)}
+                "panel_widths": dict(self.panel_widths), "row_heights": dict(self.row_heights),
+                "automatic": self.automatic, "seen_ids": list(self.seen_ids),
+                "manual_layout": deepcopy(self.manual_layout)}
+
+    def set_automatic(self, enabled):
+        if enabled == self.automatic:
+            return
+        if enabled:
+            saved = self.to_dict()
+            old = {p["id"]: p for p in self.panels}
+            self.max_columns = 10
+            self.row_counts = [10] * 10
+            self.panels = [old.get(i, {"id": i, "title": default_title(i)})
+                           for i in position_ids(self.row_counts)]
+            self.manual_layout = saved
+            self.automatic = True
+            self.seen_ids = [GENERAL]
+            self.hidden_ids = []
+        else:
+            saved = self.manual_layout or {}
+            # Keep device titles and protocol changes made while automatic was on.
+            titles = {p["id"]: p for p in self.panels}
+            restored = PanelWorkspace.restore(saved)
+            restored.panels = [deepcopy(titles.get(p["id"], p)) for p in restored.panels]
+            restored.protocol_profile = self.protocol_profile
+            restored.active = self.active
+            self.__dict__.update(restored.__dict__)
+
+    def observe(self, event):
+        """Discover destinations before filtering; no event storage or mutation."""
+        if not self.automatic or event.get("type") != "data":
+            return False
+        ident = self.destination(event)
+        if ident in self.seen_ids:
+            return False
+        self.seen_ids.append(ident)
+        return True
 
     def is_visible(self, ident):
-        return ident not in self.hidden_ids
+        return (ident not in self.hidden_ids and
+                (not self.automatic or ident == GENERAL or ident in self.seen_ids))
 
     def set_visible(self, ident, visible):
         if ident not in self.titles():

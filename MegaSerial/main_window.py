@@ -394,7 +394,9 @@ class MainWindow(QMainWindow):
         self.panel_config_btn.clicked.connect(self.panel_view.configure)
         fb.addWidget(self.panel_view.scope_button)
         self.panel_view.scope_button.hide()
-        mode_row.insertWidget(2, self.panel_view.windows_button)
+        mode_row.insertWidget(2, self.panel_view.auto_check)
+        self.panel_view.auto_check.hide()
+        mode_row.insertWidget(3, self.panel_view.windows_button)
         self.panel_view.windows_button.hide()
         fb.addWidget(self.filter_dir_combo)
         fb.addWidget(self.filter_ci_check)
@@ -883,6 +885,7 @@ class MainWindow(QMainWindow):
         self.presentation_stack.setCurrentIndex(index)
         self.panel_view.scope_button.setVisible(index == 1)
         self.panel_view.windows_button.setVisible(index == 1)
+        self.panel_view.auto_check.setVisible(index == 1)
         self.panel_config_btn.setVisible(index == 1)
         self.protocol_btn.setVisible(index == 1)
         self.split_check.setEnabled(index == 0)
@@ -897,7 +900,8 @@ class MainWindow(QMainWindow):
         if dialog.exec():
             state = self.panel_view.workspace.to_dict()
             state["protocol_profile"] = dialog.result_profile
-            if dialog.result_profile["kind"] == "zmonitor" and dialog.layout_check.isChecked():
+            if (dialog.result_profile["kind"] == "zmonitor" and dialog.layout_check.isChecked()
+                    and not self.panel_view.workspace.automatic):
                 defaults = PanelWorkspace({"max_columns": 4, "row_counts": [4, 4, 4, 4]})
                 old = {p["id"]: p for p in state["panels"]}
                 state.update(max_columns=4, row_counts=[4, 4, 4, 4],
@@ -905,6 +909,7 @@ class MainWindow(QMainWindow):
             self.panel_view.set_workspace(PanelWorkspace(state))
 
     def _on_panel_workspace_changed(self):
+        self.panel_config_btn.setEnabled(not self.panel_view.workspace.automatic)
         profile = self.panel_view.workspace.protocol_profile
         if profile != self._protocol_decoder.profile:
             self._flush_rx_buffer(force=True)
@@ -994,6 +999,7 @@ class MainWindow(QMainWindow):
         self.graph_panel.replay_events(self.events)
 
     def _emit_event(self, ev: dict) -> None:
+        self.panel_view.observe_event(ev)
         visible = list(self._filtered_events())
         prev_ts = visible[-1]["ts"] if visible else None
         evicted = self.events[0] if len(self.events) == self.events.maxlen else None
@@ -1107,6 +1113,7 @@ class MainWindow(QMainWindow):
         self._rx_flush_timer.stop()
         self._protocol_decoder = ProtocolDecoder(self.panel_view.workspace.protocol_profile)
         self.panel_view.clear()
+        self.panel_view.reset_discovery()
         for view in self.views:
             view.clear()
         self.graph_panel.clear()

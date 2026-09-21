@@ -3,6 +3,7 @@ from copy import deepcopy
 import json
 import re
 from . import utils
+from .panel_positions import valid_position_id
 from .panel_protocol import PanelProtocolParser, valid_panel_id
 
 MAX_PACKET = 65536
@@ -36,7 +37,7 @@ def validate_profile(value):
     mapping = p["mapping"]
     if (not isinstance(mapping, dict) or len(mapping) > 256
             or any(not isinstance(k, str) or not valid_panel_id(k)
-                   or not isinstance(v, str) or not re.fullmatch(r"[1-8][1-8]", v)
+                   or not isinstance(v, str) or not valid_position_id(v)
                    for k, v in mapping.items())):
         raise ValueError("Map channel names to position IDs such as 11 or 32 (up to 256 mappings)")
     for key in ("prefix", "separator"):
@@ -159,7 +160,7 @@ class ProtocolDecoder:
             if any(not c.isprintable() and c not in ("\n", "\r", "\t", "\x1b" if p["ansi"] else "") for c in payload):
                 raise ValueError("Payload contains unsupported control bytes")
             destination = p["mapping"].get(channel)
-            if destination is None and p["kind"] == "text" and re.fullmatch(r"[1-8][1-8]", channel):
+            if destination is None and p["kind"] == "text" and valid_position_id(channel):
                 destination = channel
             event = {"data": raw, "protocol": p["kind"], "device_channel": channel,
                      "panel_id": destination, "panel_payload": payload}
