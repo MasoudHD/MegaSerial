@@ -309,6 +309,7 @@ class PanelView(QScrollArea):
         dialog = PanelSettingsDialog(ident, self.workspace.titles()[ident],
                                      self.workspace.capacities()[ident], self, appearance=self.workspace.appearance(ident))
         if dialog.exec():
+            self.workspace.update_title(ident, dialog.title_edit.text().strip())
             self.workspace.set_capacity(ident, dialog.capacity.value())
             self.workspace.set_appearance(ident, dialog.appearance())
             self.refresh_titles()
@@ -511,6 +512,7 @@ class PanelView(QScrollArea):
             return
         ident, count = entry
         edit = self.widgets[ident].monitor.edit
+        was_at_bottom = edit.verticalScrollBar().value() >= edit.verticalScrollBar().maximum()
         if count >= edit.blockCount():
             edit.clear()
             self.previous.pop(ident, None)
@@ -520,6 +522,7 @@ class PanelView(QScrollArea):
             cursor.movePosition(QTextCursor.MoveOperation.NextBlock,
                                 QTextCursor.MoveMode.KeepAnchor, count)
             cursor.removeSelectedText()
+        return ident, (edit.verticalScrollBar().value(), was_at_bottom)
 
     def reset_discovery(self):
         if self.workspace.automatic:
@@ -527,6 +530,7 @@ class PanelView(QScrollArea):
             self._sync_visibility()
 
     def rerender(self, events, opts, predicate):
+        scroll_states = {ident: widget.monitor.scroll_state() for ident, widget in self.widgets.items()}
         self.clear()
         discovered = False
         for ev in events:
@@ -534,6 +538,8 @@ class PanelView(QScrollArea):
             self.append_event(ev, opts, predicate)
         if discovered:
             self._sync_visibility()
+        for ident, state in scroll_states.items():
+            self.widgets[ident].monitor.restore_scroll(state, opts)
 
     def clear(self):
         self.previous.clear()

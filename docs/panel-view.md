@@ -119,6 +119,25 @@ General clearing includes unrouted/unknown-destination events retained there.
 Hiding continues receiving and counting messages; restore the panel through
 **Windows ▾**. The global Clear button still clears all histories and counters.
 
+## Titles, defaults and following live data
+
+**Window settings…** includes an editable **Title** field. Renaming updates the
+header and menus and is saved in the project; the routing ID stays unchanged.
+A blank title uses `General` for ID `11`, or `Panel <ID>` for other panels.
+
+**Reset to defaults** fills the dialog with the default title, 10,000-message
+capacity, default colors, global timestamp/line-number inheritance, and an enabled
+received counter. Click **OK** to apply, or **Cancel** to discard the dialog edits.
+Position, routing ID and counter total are preserved. Logs are preserved except
+for oldest excess messages if resetting capacity lowers the current depth.
+
+With global autoscroll enabled, a monitor already at the bottom follows new data.
+Scroll upward to pause following; scroll back to the bottom to resume. This applies
+independently to every panel and to normal/split monitors. New messages and ordinary
+rerenders do not force a paused view to the bottom. Global autoscroll OFF disables
+following. If capacity eviction deletes the content being read, the position is
+clamped to the remaining content instead of intentionally jumping to the end.
+
 ## Drag panels to rearrange
 
 Drag a panel's **header** onto another panel to swap their positions. Empty cells

@@ -2,9 +2,10 @@
 from PyQt6.QtGui import QColor, QIcon, QPixmap
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QSpinBox, QLabel,
-    QDialogButtonBox, QWidget, QComboBox, QPushButton, QColorDialog, QCheckBox, QGroupBox,
+    QDialogButtonBox, QLineEdit, QWidget, QComboBox, QPushButton, QColorDialog, QCheckBox, QGroupBox,
 )
-from .event_history import MAX_CAPACITY
+from .event_history import MAX_CAPACITY, DEFAULT_CAPACITY
+from .panel_model import default_title
 from .panel_appearance import normalize_appearance
 
 
@@ -50,9 +51,12 @@ class PanelSettingsDialog(QDialog):
     def __init__(self, ident, title, capacity, parent=None, appearance=None):
         super().__init__(parent)
         self.setWindowTitle(f"Window settings — {title} ({ident})")
+        self.ident = ident
         appearance = normalize_appearance(appearance)
         layout = QVBoxLayout(self)
         form = QFormLayout()
+        self.title_edit = QLineEdit(title)
+        form.addRow("Title", self.title_edit)
         self.capacity = QSpinBox()
         self.capacity.setRange(1, MAX_CAPACITY)
         self.capacity.setGroupSeparatorShown(True)
@@ -90,9 +94,20 @@ class PanelSettingsDialog(QDialog):
         note.setWordWrap(True)
         layout.addWidget(note)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        self.reset_button = buttons.addButton("Reset to defaults", QDialogButtonBox.ButtonRole.ResetRole)
+        self.reset_button.clicked.connect(self.reset_defaults)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+    def reset_defaults(self):
+        self.title_edit.setText(default_title(self.ident))
+        self.capacity.setValue(DEFAULT_CAPACITY)
+        for control in self.colors.values():
+            control.set_color(None)
+        for control in self.overrides.values():
+            control.setCurrentIndex(0)
+        self.show_counter.setChecked(True)
 
     def appearance(self):
         values = {key: control.value() for key, control in self.colors.items()}

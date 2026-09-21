@@ -158,3 +158,10 @@ RX counters are workspace statistics incremented once at event ingestion, separa
 from retained history, and persisted with the workspace. Clear-window requests go
 through a `PanelView` signal to `MainWindow`, which clears only the destination
 queue and its panel presentation, then updates normal views and graph replay.
+
+`MonitorView` captures scrollbar position and whether it was at the bottom before
+appending or replaying events. It follows only when already at the bottom and
+global autoscroll is enabled. Panel replay and destination eviction preserve this
+state across clear/trim operations. Window-title editing reuses existing workspace
+titles; resetting settings changes dialog fields until accepted and needs no new
+persistence fields.

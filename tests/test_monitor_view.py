@@ -39,6 +39,30 @@ class MonitorViewZoomTests(unittest.TestCase):
         self.view = MonitorView(font_point_size=12)
         self.addCleanup(self.view.deleteLater)
 
+    def test_scroll_pauses_resumes_and_respects_global_switch(self):
+        from test_monitor import OPTS, TS
+        view = self.view
+        view.resize(500, 250)
+        view.show()
+        _APP.processEvents()
+        opts = {**OPTS, 'autoscroll': True}
+        events = [{'type': 'data', 'dir': 'rx', 'ts': TS, 'data': f'line {i}'.encode()}
+                  for i in range(100)]
+        view.rerender(events, opts)
+        bar = view.edit.verticalScrollBar()
+        self.assertEqual(bar.value(), bar.maximum())
+        bar.setValue(10)
+        view.append_event(events[0], opts)
+        self.assertEqual(bar.value(), 10)
+        view.rerender(events, opts)
+        self.assertEqual(bar.value(), 10)
+        bar.setValue(bar.maximum())
+        view.append_event(events[0], opts)
+        self.assertEqual(bar.value(), bar.maximum())
+        before = bar.value()
+        view.append_event(events[0], {**opts, 'autoscroll': False})
+        self.assertEqual(bar.value(), before)
+
     def test_initial_and_explicit_font_sizes_are_clamped(self):
         self.assertEqual(self.view.font_point_size, 12)
         self.assertEqual(self.view.set_font_point_size(MAX_FONT_POINT_SIZE + 10),

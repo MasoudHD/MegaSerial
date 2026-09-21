@@ -305,14 +305,23 @@ class MonitorView(QWidget):
             return 16
 
     # -- rendering ---------------------------------------------------------
+    def scroll_state(self):
+        scrollbar = self.edit.verticalScrollBar()
+        return scrollbar.value(), scrollbar.value() >= scrollbar.maximum()
+
+    def restore_scroll(self, state, opts):
+        value, at_bottom = state
+        scrollbar = self.edit.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum() if at_bottom and opts.get("autoscroll") else value)
+
     def append_event(self, ev: dict, opts: dict, prev_ts: datetime | None = None) -> None:
+        state = self.scroll_state()
         self._line_counter += 1
         self.edit.appendHtml(render_html(ev, self.fmt, self.bytes_per_row, opts, prev_ts, self._line_counter))
-        if opts.get("autoscroll"):
-            sb = self.edit.verticalScrollBar()
-            sb.setValue(sb.maximum())
+        self.restore_scroll(state, opts)
 
     def rerender(self, events, opts: dict) -> None:
+        state = self.scroll_state()
         self.edit.clear()
         self._line_counter = 0
         fmt = self.fmt
@@ -323,9 +332,7 @@ class MonitorView(QWidget):
             self.edit.appendHtml(render_html(ev, fmt, bpr, opts, prev_ts, self._line_counter))
             if "ts" in ev:
                 prev_ts = ev["ts"]
-        if opts.get("autoscroll"):
-            sb = self.edit.verticalScrollBar()
-            sb.setValue(sb.maximum())
+        self.restore_scroll(state, opts)
 
     def clear(self) -> None:
         self.edit.clear()

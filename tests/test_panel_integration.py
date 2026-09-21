@@ -291,6 +291,55 @@ class PanelIntegrationTests(unittest.TestCase):
         self.assertEqual(w.panel_view.widgets['12'].monitor.font_point_size, font_size)
         self.assertIn('first', self.text('12'))
 
+    def test_window_title_reset_and_cancel(self):
+        from MegaSerial.panel_settings import PanelSettingsDialog
+        w = self.window
+        view = w.panel_view
+        view.workspace.set_appearance('12', {'background': '#123456', 'show_ts': False})
+        w.on_data_received(b'@PANEL:12|retained\n')
+        dialog = PanelSettingsDialog('12', 'GPS', 20000, appearance=view.workspace.appearance('12'))
+        self.addCleanup(dialog.deleteLater)
+        dialog.reset_button.click()
+        self.assertEqual(dialog.title_edit.text(), 'Panel 12')
+        self.assertEqual(dialog.capacity.value(), 10000)
+        self.assertEqual(dialog.appearance(), {'show_counter': True})
+        before = view.workspace.to_dict()
+        with patch('MegaSerial.panel_view.PanelSettingsDialog', return_value=dialog), patch.object(dialog, 'exec', return_value=0):
+            view.configure_window('12')
+        self.assertEqual(view.workspace.to_dict(), before)
+        dialog.title_edit.setText('گیرنده GPS')
+        with patch('MegaSerial.panel_view.PanelSettingsDialog', return_value=dialog), patch.object(dialog, 'exec', return_value=1):
+            view.configure_window('12')
+        self.assertEqual(view.workspace.titles()['12'], 'گیرنده GPS')
+        self.assertIn('گیرنده GPS', view.widgets['12'].header.text())
+        self.assertTrue(any('گیرنده GPS' in a.text() for a in view.windows_menu.actions()))
+        self.assertEqual(view.workspace.received_counts['12'], 1)
+        self.assertIn('retained', self.text('12'))
+        self.assertEqual(w.events[0]['panel_id'], '12')
+
+    def test_panel_scroll_with_eviction_and_independent_follow(self):
+        w = self.window
+        view = w.panel_view
+        w.resize(1300, 900)
+        w.show()
+        _APP.processEvents()
+        view.workspace.set_capacity('12', 80)
+        w._on_panel_workspace_changed()
+        w.on_data_received(b'@PANEL:12|retained\n' * 80 + b'@PANEL:21|other\n' * 80)
+        _APP.processEvents()
+        bar = view.widgets['12'].monitor.edit.verticalScrollBar()
+        other = view.widgets['21'].monitor.edit.verticalScrollBar()
+        self.assertGreater(bar.maximum(), 10)
+        bar.setValue(10)
+        w.on_data_received(b'@PANEL:12|new\n@PANEL:21|new other\n')
+        self.assertLess(bar.value(), bar.maximum())
+        self.assertEqual(other.value(), other.maximum())
+        w._rerender_all()
+        self.assertLess(bar.value(), bar.maximum())
+        bar.setValue(bar.maximum())
+        w.on_data_received(b'@PANEL:12|follow\n')
+        self.assertEqual(bar.value(), bar.maximum())
+
     def test_panel_display_overrides_counter_and_clear_isolation(self):
         from MegaSerial.panel_settings import PanelSettingsDialog
         w = self.window
@@ -344,6 +393,7 @@ class PanelIntegrationTests(unittest.TestCase):
         w.on_data_received(b'@PANEL:12|old\n@PANEL:21|quiet\n@PANEL:12|new\n')
         dialog = Mock()
         dialog.exec.return_value = True
+        dialog.title_edit.text.return_value = "GPS"
         dialog.capacity.value.return_value = 1
         with patch('MegaSerial.panel_view.PanelSettingsDialog', return_value=dialog):
             w.panel_view.configure_window('12')

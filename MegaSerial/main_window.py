@@ -1019,9 +1019,11 @@ class MainWindow(QMainWindow):
             for view in self._active_views():
                 view.append_event(ev, opts, prev_ts)
         if self.panel_view.workspace.active:
-            if evicted is not None:
-                self.panel_view.forget_event(evicted)
+            scroll_state = self.panel_view.forget_event(evicted) if evicted is not None else None
             self.panel_view.append_event(ev, opts, self._event_passes_filter)
+            if scroll_state is not None:
+                ident, state = scroll_state
+                self.panel_view.widgets[ident].monitor.restore_scroll(state, opts)
         if self.graph_view_check.isChecked():
             self.graph_panel.feed_event(ev)
 
