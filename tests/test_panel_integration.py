@@ -30,6 +30,36 @@ class PanelIntegrationTests(unittest.TestCase):
     def text(self, ident):
         return self.window.panel_view.widgets[ident].monitor.plain_text()
 
+    def test_resize_panels_rows_and_restore_proportions(self):
+        from MegaSerial.panel_model import PanelWorkspace
+        w = self.window
+        w.resize(1400, 1000)
+        w.show()
+        _APP.processEvents()
+        view = w.panel_view
+        w.on_data_received(b'@PANEL:12|retained\n')
+        events = deepcopy(list(w.events))
+        row = view.rows[0][0]
+        before = row.sizes()
+        row.moveSplitter(int(sum(before) * 0.65), 1)
+        view.row_splitter.moveSplitter(int(sum(view.row_splitter.sizes()) * 0.65), 1)
+        _APP.processEvents()
+        self.assertGreater(row.sizes()[0], before[0])
+        self.assertGreater(view.row_splitter.sizes()[0], view.row_splitter.sizes()[1])
+        state = view.workspace.to_dict()
+        self.assertGreater(state['panel_widths']['11'], state['panel_widths']['12'])
+        self.assertGreater(state['row_heights']['0'], state['row_heights']['1'])
+        view.set_panel_visible('12', False)
+        view.set_panel_visible('12', True)
+        _APP.processEvents()
+        self.assertEqual(view.workspace.to_dict(), state)
+        view.set_workspace(PanelWorkspace.restore(state))
+        _APP.processEvents()
+        self.assertGreater(view.rows[0][0].sizes()[0], view.rows[0][0].sizes()[1])
+        self.assertGreater(view.row_splitter.sizes()[0], view.row_splitter.sizes()[1])
+        self.assertEqual(list(w.events), events)
+        self.assertEqual(list(view.widgets), ['11', '12', '21'])
+
     def test_fragmented_rx_title_unknown_and_tx(self):
         w = self.window
         w.on_data_received(b'@PAN')

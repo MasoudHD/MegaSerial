@@ -12,6 +12,8 @@ class PanelPersistenceTests(unittest.TestCase):
         w = workspace()
         w.active = True
         w.scope = ['12', '21']
+        w.panel_widths = {'11': 1300, '12': 700}
+        w.row_heights = {'0': 1200, '1': 800}
         w.update_title('12', 'گیرنده')
         events = [{'type': 'data', 'dir': 'rx', 'ts': datetime.now(),
                    'data': b'@PANEL:12|OK\n', 'panel_id': '12', 'panel_payload': 'OK'},

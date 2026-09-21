@@ -4,7 +4,7 @@ from PyQt6.QtGui import QTextCursor, QColor
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QMenu,
     QDialog, QDialogButtonBox, QSpinBox, QFormLayout, QTableWidget,
-    QTableWidgetItem, QHeaderView, QMessageBox, QScrollArea, QSizePolicy,
+    QTableWidgetItem, QHeaderView, QMessageBox, QScrollArea, QSizePolicy, QSplitter,
 )
 from .monitor import MonitorView
 from .panel_model import PanelWorkspace, MAX_ROWS, MAX_COLUMNS, default_title
@@ -170,28 +170,53 @@ class PanelView(QScrollArea):
         self.widgets = {}
         self.previous = {}
         self.rendered_blocks = {}
+        self.row_splitter = self._splitter(Qt.Orientation.Vertical)
+        layout.addWidget(self.row_splitter, 1)
         idx = 0
         self.rows = []
         for count in self.workspace.row_counts:
-            row_widget = QWidget()
-            row = QHBoxLayout(row_widget)
-            row.setContentsMargins(0, 0, 0, 0)
+            row_widget = self._splitter(Qt.Orientation.Horizontal)
             row_ids = []
             for _ in range(count):
                 panel = self.workspace.panels[idx]
                 widget = PanelWidget(panel, self.font_size, self.on_zoom)
                 self.widgets[panel["id"]] = widget
-                row.addWidget(widget, 1)
+                row_widget.addWidget(widget)
+                row_widget.setStretchFactor(row_widget.count() - 1, 1)
                 row_ids.append(panel["id"])
                 idx += 1
             self.rows.append((row_widget, row_ids))
-            layout.addWidget(row_widget, 1)
+            self.row_splitter.addWidget(row_widget)
+            self.row_splitter.setStretchFactor(self.row_splitter.count() - 1, 1)
+            row_widget.splitterMoved.connect(
+                lambda _pos, _index, splitter=row_widget, ids=row_ids:
+                self._remember_sizes(splitter, ids, self.workspace.panel_widths))
+        self.row_splitter.splitterMoved.connect(
+            lambda _pos, _index: self._remember_sizes(
+                self.row_splitter, [str(i) for i in range(len(self.rows))], self.workspace.row_heights))
         self.empty_label = QLabel("All windows are hidden. Use Windows to show a panel.")
         self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.empty_label, 1)
         self.setWidget(body)
         self.refresh_titles()
         self._sync_visibility()
+
+    @staticmethod
+    def _splitter(orientation):
+        splitter = QSplitter(orientation)
+        splitter.setChildrenCollapsible(False)
+        splitter.setHandleWidth(7)
+        splitter.setToolTip("Drag the divider to resize panels")
+        return splitter
+
+    @staticmethod
+    def _remember_sizes(splitter, ids, weights):
+        # Keep hidden panels' proportions while resizing the visible siblings.
+        visible = [(ident, size) for ident, size in zip(ids, splitter.sizes()) if size > 0]
+        total = sum(size for _, size in visible)
+        weight_total = sum(weights.get(ident, 1000) for ident, _ in visible)
+        for ident, size in visible:
+            weights[ident] = max(1, round(size * weight_total / total))
 
     def refresh_titles(self):
         self.scope_menu.clear()
@@ -232,7 +257,13 @@ class PanelView(QScrollArea):
             widget.setVisible(self.workspace.is_visible(ident))
         for row, ids in self.rows:
             row.setVisible(any(self.workspace.is_visible(ident) for ident in ids))
-        self.empty_label.setVisible(not any(self.workspace.is_visible(i) for i in self.widgets))
+        any_visible = any(self.workspace.is_visible(i) for i in self.widgets)
+        self.row_splitter.setVisible(any_visible)
+        self.empty_label.setVisible(not any_visible)
+        for row, ids in self.rows:
+            row.setSizes([self.workspace.panel_widths.get(ident, 1000) for ident in ids])
+        self.row_splitter.setSizes([self.workspace.row_heights.get(str(i), 1000)
+                                   for i in range(len(self.rows))])
 
     def apply_control(self, ev):
         """Apply a decoded title/style command to its configured destination."""

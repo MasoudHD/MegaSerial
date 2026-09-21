@@ -124,3 +124,7 @@ text projection. `PanelView` applies decoded title/style commands, while the
 shared event deque still retains their raw frames. `MainWindow` coordinates
 selection, bounded decoder flushing and event ingestion. No new runtime
 dependencies are introduced. See [protocol profiles](protocol-profiles.md).
+
+Panel View uses a vertical `QSplitter` for rows and a horizontal `QSplitter`
+within each row. Dragged proportions live in optional `PanelWorkspace` fields
+and use the existing project serialization path; resizing does not alter events.

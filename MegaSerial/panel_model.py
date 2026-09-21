@@ -26,6 +26,8 @@ class PanelWorkspace:
         self.panels = [{"id": GENERAL, "title": "General"}]
         self.protocol_profile = preset()
         self.hidden_ids = []
+        self.panel_widths = {}
+        self.row_heights = {}
         self.scope = None  # None means All, [] means no panels are filtered.
         if state is not None:
             self._load(state)
@@ -66,6 +68,15 @@ class PanelWorkspace:
         for panel in self.panels:
             panel["title"] = panel["title"] or default_title(panel["id"])
         self.scope = None if scope is None else list(dict.fromkeys(s for s in scope if s in ids))
+        def weights(key, allowed):
+            values = state.get(key, {})
+            if not isinstance(values, dict):
+                return {}
+            return {k: v for k, v in values.items()
+                    if k in allowed and type(v) is int and 1 <= v <= 100000}
+
+        self.panel_widths = weights("panel_widths", ids)
+        self.row_heights = weights("row_heights", [str(i) for i in range(len(counts))])
         hidden = state.get("hidden_ids", [])
         self.hidden_ids = [ident for ident in ids if ident in hidden] if isinstance(hidden, list) else []
 
@@ -81,7 +92,8 @@ class PanelWorkspace:
                 "max_columns": self.max_columns, "row_counts": list(self.row_counts),
                 "panels": deepcopy(self.panels), "scope": deepcopy(self.scope),
                 "protocol_profile": deepcopy(self.protocol_profile),
-                "hidden_ids": list(self.hidden_ids)}
+                "hidden_ids": list(self.hidden_ids),
+                "panel_widths": dict(self.panel_widths), "row_heights": dict(self.row_heights)}
 
     def is_visible(self, ident):
         return ident not in self.hidden_ids

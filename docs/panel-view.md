@@ -8,7 +8,7 @@ IDs are read-only and always visible in panel headers. Create the layout and sen
 data immediately; titles and title commands are not required. Blank titles use
 `Panel <ID>`. General occupies the first cell (`11`) and also accepts routed data.
 Its title defaults to General and may be edited without affecting fallback routing.
-Every row shares its width equally among its panels. Layouts support 1–8 rows
+Rows initially share their width equally among their panels. Layouts support 1–8 rows
 and 1–8 columns. Changing row lengths preserves titles and data by position ID,
 not by flattened panel order. Removed positions fall back to cell 11; restoring
 a position displays its retained events again.
@@ -36,6 +36,15 @@ the remainder of that logical line is not interpreted. Changing line mode or
 closing the serial connection flushes incomplete commands as ordinary data.
 Clearing the monitor also clears pending input. A still-pending incomplete line
 is not yet a stored event and is not included in project/export output.
+
+## Resize panels
+
+Drag the divider between panels to change their widths within a row. Drag the
+divider between rows to change row heights; panels in the same row share a height.
+Panel IDs and stored events remain unchanged. Each panel still scrolls independently.
+The proportions follow main-window resizing and are saved in the project using
+optional `panel_widths` and `row_heights` fields. Hiding and showing panels retains
+these proportions. Projects without saved sizes start with equal sizes.
 
 ## Routing and search
 
