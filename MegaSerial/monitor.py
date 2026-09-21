@@ -191,7 +191,8 @@ def render_html(ev: dict, fmt: str, bytes_per_row: int, opts: dict,
     direction = ev["dir"]
     color = colors["tx"] if direction == "tx" else colors["rx"]
     if opts.get("show_dir"):
-        arrow_color = DIRECTION_COLORS["tx" if direction == "tx" else "rx"]
+        arrow_direction = "tx" if direction == "tx" else "rx"
+        arrow_color = opts.get("direction_colors", {}).get(arrow_direction, DIRECTION_COLORS[arrow_direction])
         prefix += f'<span style="color:{arrow_color}">{direction_symbol(direction)} </span>'
     body = (ev["data"].decode("utf-8", errors="replace")
             if fmt == "ASCII" and opts.get("unicode_text")

@@ -392,6 +392,7 @@ class MainWindow(QMainWindow):
         fb.addWidget(self.filter_pattern, 1)
         self.panel_view = PanelView(self._monitor_font_pt, self.zoom_monitor)
         self.panel_view.changed.connect(self._on_panel_workspace_changed)
+        self.panel_view.clear_requested.connect(self._clear_panel)
         self.panel_config_btn.clicked.connect(self.panel_view.configure)
         fb.addWidget(self.panel_view.scope_button)
         self.panel_view.scope_button.hide()
@@ -1002,6 +1003,9 @@ class MainWindow(QMainWindow):
         self.graph_panel.replay_events(self.events)
 
     def _emit_event(self, ev: dict) -> None:
+        ident = self.panel_view.workspace.record_received(ev)
+        if ident is not None:
+            self.panel_view.refresh_counter(ident)
         self.panel_view.observe_event(ev)
         previous = next((event for event in islice(reversed(self.events), MAX_EVENTS)
                          if self._event_passes_filter(event)), None)
@@ -1112,8 +1116,21 @@ class MainWindow(QMainWindow):
                 total = max(self.view_splitter.width(), 400)
                 self.view_splitter.setSizes([total // 2, total // 2])
 
+    def _clear_panel(self, ident):
+        if ident not in self.panel_view.widgets:
+            return
+        self.events.clear_panel(ident)
+        self.panel_view.clear_panel(ident)
+        for view in self.views:
+            self._rerender_view(view)
+        if self.graph_view_check.isChecked():
+            self._replay_graph()
+
     def clear_monitor(self) -> None:
         self.events.clear()
+        self.panel_view.workspace.received_counts.clear()
+        for ident in self.panel_view.widgets:
+            self.panel_view.refresh_counter(ident)
         self._rx_buf.clear()
         self._rx_line_start = True
         self._rx_flush_timer.stop()
@@ -1759,7 +1776,11 @@ class MainWindow(QMainWindow):
         self._rx_flush_timer.stop()
         self._rx_buf.clear()
         self._rx_line_start = True
-        self.panel_view.set_workspace(PanelWorkspace.restore(loaded.get("panel_view")))
+        workspace = PanelWorkspace.restore(loaded.get("panel_view"))
+        if not isinstance(loaded.get("panel_view"), dict) or not loaded['panel_view'].get('received_counts'):
+            for ev in loaded.get('events', []):
+                workspace.record_received(ev)
+        self.panel_view.set_workspace(workspace)
         self._protocol_decoder = ProtocolDecoder(self.panel_view.workspace.protocol_profile)
         self.presentation_combo.setCurrentIndex(int(self.panel_view.workspace.active))
         self.cfg.update(settings)

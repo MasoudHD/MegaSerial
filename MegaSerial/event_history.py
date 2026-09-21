@@ -48,6 +48,13 @@ class EventHistory:
             return event
         return None
 
+    def clear_panel(self, ident):
+        for key in self._panels.pop(ident, ()):
+            self._events.pop(key, None)
+        self._recent = OrderedDict.fromkeys(reversed(list(islice(
+            reversed(self._events), self._recent_limit))))
+        self.evicted_recently = False
+
     def clear(self):
         self._events.clear()
         self._recent.clear()

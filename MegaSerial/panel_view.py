@@ -11,6 +11,7 @@ from .panel_model import PanelWorkspace, MAX_ROWS, MAX_COLUMNS, default_title
 from .panel_protocol import panel_event
 from .panel_positions import position_id
 from .panel_settings import PanelSettingsDialog
+from .panel_appearance import panel_options
 from .panel_drag import PanelHeader, PanelDropTarget
 from .panel_arrangement import positions, move_panel
 
@@ -136,6 +137,12 @@ class PanelWidget(PanelDropTarget):
             if head.itemAt(i).widget():
                 head.itemAt(i).widget().hide()
         layout.addWidget(self.monitor, 1)
+        self.counter = QLabel('Received: 0')
+        self.counter.setTextFormat(Qt.TextFormat.PlainText)
+        layout.addWidget(self.counter)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(
+            lambda point: view.show_window_menu(panel["id"], self, point))
         self.monitor.edit.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.monitor.edit.customContextMenuRequested.connect(
             lambda point: view.show_window_menu(panel["id"], self.monitor.edit, point))
@@ -143,6 +150,7 @@ class PanelWidget(PanelDropTarget):
 
 class PanelView(QScrollArea):
     changed = pyqtSignal()
+    clear_requested = pyqtSignal(str)
 
     def __init__(self, font_size, on_zoom):
         super().__init__()
@@ -262,7 +270,17 @@ class PanelView(QScrollArea):
                 color = QColor(value if isinstance(value, str) else "")
                 if color.isValid():
                     styles.append(f"{css}:{color.name()}")
+            appearance = self.workspace.appearance(ident)
+            if 'title' in appearance:
+                styles.append(f"color:{appearance['title']}")
             self.widgets[ident].header.setStyleSheet(";".join(styles))
+            self.widgets[ident].setStyleSheet(
+                f"PanelWidget {{background-color:{appearance['background']};}}" if 'background' in appearance else '')
+            self.widgets[ident].counter.setStyleSheet(
+                f"color:{appearance['text']};" if 'text' in appearance else '')
+            self.widgets[ident].monitor.edit.setStyleSheet(
+                f"background-color:{appearance['background']};" if 'background' in appearance else '')
+            self.refresh_counter(ident)
             action = self.scope_menu.addAction(f"{title} ({ident})")
             action.setCheckable(True)
             action.setChecked(self.workspace.in_scope(ident))
@@ -281,15 +299,19 @@ class PanelView(QScrollArea):
         if menu.actions():
             menu.addSeparator()
         menu.addAction("Window settings…", lambda: self.configure_window(ident))
+        menu.addAction("Clear window", lambda: self.clear_requested.emit(ident))
+        menu.addAction("Hide window", lambda: self.set_panel_visible(ident, False))
         menu.addAction("Reset arrangement", self.reset_arrangement)
         menu.exec(widget.mapToGlobal(point))
         menu.deleteLater()
 
     def configure_window(self, ident):
         dialog = PanelSettingsDialog(ident, self.workspace.titles()[ident],
-                                     self.workspace.capacities()[ident], self)
+                                     self.workspace.capacities()[ident], self, appearance=self.workspace.appearance(ident))
         if dialog.exec():
             self.workspace.set_capacity(ident, dialog.capacity.value())
+            self.workspace.set_appearance(ident, dialog.appearance())
+            self.refresh_titles()
             self.changed.emit()
 
     def reset_arrangement(self):
@@ -462,9 +484,22 @@ class PanelView(QScrollArea):
             ident = self.workspace.destination(ev)
             monitor = self.widgets[ident].monitor
             before = 0 if monitor.edit.document().isEmpty() else monitor.edit.blockCount()
-            monitor.append_event(ev, {**opts, "unicode_text": True}, self.previous.get(ident))
+            monitor.append_event(ev, panel_options(opts, self.workspace.appearance(ident)), self.previous.get(ident))
             self.rendered_blocks[event_key] = (ident, monitor.edit.blockCount() - before)
             self.previous[ident] = ev.get("ts")
+
+    def refresh_counter(self, ident):
+        widget = self.widgets.get(ident)
+        if widget is not None:
+            widget.counter.setText(f"Received: {self.workspace.received_counts.get(ident, 0):,}")
+            widget.counter.setVisible(self.workspace.appearance(ident).get('show_counter', True))
+
+    def clear_panel(self, ident):
+        self.widgets[ident].monitor.clear()
+        self.previous.pop(ident, None)
+        self.rendered_blocks = {key: entry for key, entry in self.rendered_blocks.items() if entry[0] != ident}
+        self.workspace.received_counts[ident] = 0
+        self.refresh_counter(ident)
 
     def forget_event(self, ev):
         """Trim presentation blocks when its destination queue evicts an entry.

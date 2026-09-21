@@ -149,3 +149,12 @@ and trims the affected panel presentation on eviction. Project saving and panel
 export iterate the complete retained index; Normal Monitor remains a 6,000-event
 presentation. `panel_settings.py` provides the extensible per-window settings dialog.
 Capacity changes rebuild retention and replay views without altering serial I/O.
+
+`panel_appearance.py` validates optional per-panel appearance and derives rendering
+options without mutating global options or events. `panel_settings.py` exposes
+color presets/pickers and display inheritance controls. The existing monitor
+renderer accepts optional direction-icon colors; Normal Monitor keeps its defaults.
+RX counters are workspace statistics incremented once at event ingestion, separately
+from retained history, and persisted with the workspace. Clear-window requests go
+through a `PanelView` signal to `MainWindow`, which clears only the destination
+queue and its panel presentation, then updates normal views and graph replay.

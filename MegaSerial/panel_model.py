@@ -3,6 +3,7 @@ from copy import deepcopy
 from .protocol_profiles import preset, validate_profile
 from .panel_protocol import valid_panel_id
 from .panel_positions import position_id
+from .panel_appearance import normalize_appearance
 from .event_history import DEFAULT_CAPACITY, MAX_CAPACITY
 from .panel_arrangement import normalize_positions
 
@@ -28,6 +29,7 @@ class PanelWorkspace:
         self.row_counts = [1]
         self.panels = [{"id": GENERAL, "title": "General"}]
         self.protocol_profile = preset()
+        self.received_counts = {}
         self.hidden_ids = []
         self.display_positions = {}
         self.panel_widths = {}
@@ -74,9 +76,15 @@ class PanelWorkspace:
         self.panels = deepcopy(panels)
         for panel in self.panels:
             panel["title"] = panel["title"] or default_title(panel["id"])
+            if "appearance" in panel:
+                panel["appearance"] = normalize_appearance(panel["appearance"])
             capacity = panel.get("capacity", DEFAULT_CAPACITY)
             if type(capacity) is not int or not 1 <= capacity <= MAX_CAPACITY:
                 panel.pop("capacity", None)
+        counters = state.get("received_counts", {})
+        if isinstance(counters, dict):
+            self.received_counts = {i: n for i, n in counters.items()
+                                    if i in ids and type(n) is int and n >= 0}
         self.scope = None if scope is None else list(dict.fromkeys(s for s in scope if s in ids))
         def weights(key, allowed):
             values = state.get(key, {})
@@ -112,7 +120,7 @@ class PanelWorkspace:
                 "max_columns": self.max_columns, "row_counts": list(self.row_counts),
                 "panels": deepcopy(self.panels), "scope": deepcopy(self.scope),
                 "protocol_profile": deepcopy(self.protocol_profile),
-                "hidden_ids": list(self.hidden_ids),
+                "hidden_ids": list(self.hidden_ids), "received_counts": dict(self.received_counts),
                 "panel_widths": dict(self.panel_widths), "row_heights": dict(self.row_heights),
                 "automatic": self.automatic, "seen_ids": list(self.seen_ids),
                 "manual_layout": deepcopy(self.manual_layout),
@@ -139,6 +147,7 @@ class PanelWorkspace:
             titles = {p["id"]: p for p in self.panels}
             restored = PanelWorkspace.restore(saved)
             restored.panels = [deepcopy(titles.get(p["id"], p)) for p in restored.panels]
+            restored.received_counts = {i: n for i, n in self.received_counts.items() if i in restored.titles()}
             restored.protocol_profile = self.protocol_profile
             restored.active = self.active
             self.__dict__.update(restored.__dict__)
@@ -164,6 +173,22 @@ class PanelWorkspace:
             self.hidden_ids = [i for i in self.hidden_ids if i != ident]
         elif ident not in self.hidden_ids:
             self.hidden_ids.append(ident)
+
+    def appearance(self, ident):
+        return next((p.get("appearance", {}) for p in self.panels if p["id"] == ident), {})
+
+    def set_appearance(self, ident, value):
+        for panel in self.panels:
+            if panel["id"] == ident:
+                panel["appearance"] = normalize_appearance(value)
+                return
+
+    def record_received(self, event):
+        if event.get("type") == "data" and event.get("dir") == "rx":
+            ident = self.destination(event)
+            self.received_counts[ident] = self.received_counts.get(ident, 0) + 1
+            return ident
+        return None
 
     def capacities(self):
         return {p["id"]: p.get("capacity", DEFAULT_CAPACITY) for p in self.panels}

@@ -291,6 +291,52 @@ class PanelIntegrationTests(unittest.TestCase):
         self.assertEqual(w.panel_view.widgets['12'].monitor.font_point_size, font_size)
         self.assertIn('first', self.text('12'))
 
+    def test_panel_display_overrides_counter_and_clear_isolation(self):
+        from MegaSerial.panel_settings import PanelSettingsDialog
+        w = self.window
+        view = w.panel_view
+        view.workspace.set_capacity('12', 1)
+        view.workspace.set_appearance('12', {'background': '#012345', 'text': '#abcdef',
+            'title': '#112233', 'rx': '#ff00ff', 'tx': '#00ffff',
+            'show_ts': False, 'show_linenum': True})
+        view.refresh_titles()
+        w._on_panel_workspace_changed()
+        w.on_data_received(b'@PANEL:12|old\n@PANEL:21|quiet\n@PANEL:12|kept\n')
+        self.assertEqual(view.widgets['12'].counter.text(), 'Received: 2')
+        self.assertEqual(view.widgets['21'].counter.text(), 'Received: 1')
+        self.assertFalse(view.widgets['12'].counter.isHidden())
+        self.assertIn('#012345', view.widgets['12'].monitor.edit.styleSheet())
+        self.assertIn('#112233', view.widgets['12'].header.styleSheet())
+        self.assertNotIn(w.events[-1]['ts'].strftime('%H:%M:%S'), self.text('12'))
+        other = view.widgets['21'].monitor
+        w.filter_pattern.setText('nomatch')
+        w.filter_check.setChecked(True)
+        view.set_panel_visible('12', False)
+        w.on_data_received(b'@PANEL:12|hidden\n')
+        self.assertEqual(view.widgets['12'].counter.text(), 'Received: 3')
+        w._rerender_all()
+        self.assertEqual(view.workspace.received_counts['12'], 3)
+        view.clear_requested.emit('12')
+        self.assertEqual(view.widgets['12'].counter.text(), 'Received: 0')
+        self.assertEqual(view.workspace.received_counts['21'], 1)
+        self.assertEqual([e['panel_id'] for e in w.events], ['21'])
+        self.assertIs(view.widgets['21'].monitor, other)
+        w.filter_check.setChecked(False)
+        self.assertIn('quiet', self.text('21'))
+        view.workspace.set_appearance('21', {'show_counter': False})
+        view.refresh_titles()
+        self.assertTrue(view.widgets['21'].counter.isHidden())
+        w.clear_monitor()
+        self.assertEqual(view.workspace.received_counts, {})
+        dialog = PanelSettingsDialog('12', 'GPS', 10000, appearance={'show_ts': False})
+        self.assertFalse(dialog.appearance()['show_ts'])
+        self.assertTrue(dialog.appearance()['show_counter'])
+        dialog.colors['rx'].set_color('#123456')
+        self.assertEqual(dialog.appearance()['rx'], '#123456')
+        dialog.colors['rx'].set_color(None)
+        self.assertNotIn('rx', dialog.appearance())
+        dialog.deleteLater()
+
     def test_window_capacity_settings_trim_only_selected_panel(self):
         from unittest.mock import Mock
         from MegaSerial.panel_settings import PanelSettingsDialog

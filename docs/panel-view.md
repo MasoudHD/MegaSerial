@@ -88,6 +88,37 @@ Moving panels preserves their capacity and history. Changing the configured
 routing IDs/layout reassigns retained events to their current destination and
 applies that destination's capacity (removed destinations fall back to General).
 
+## Per-window appearance and display
+
+The same **Window settings…** popup also contains:
+
+- Background and message-text colors.
+- Title-text color and separate RX/TX **direction icon** colors.
+- Timestamp and line-number overrides: **Use global setting**, **Show**, or **Hide**.
+- **Show received-message counter**, enabled by default.
+
+Every color has preset swatches, **Choose color…** for the full color picker, and
+**Use default** to follow the existing theme/protocol presentation. Explicit title
+color overrides device-supplied title colors until reset to default. Message text
+color sets the default message foreground; explicit ANSI colors remain supported.
+These settings affect only the selected panel, including already retained messages.
+Moving or hiding the panel preserves them. They are optional `appearance` fields
+on panel definitions in `.msproj`; older projects inherit the existing defaults.
+
+The footer displays **Received: N**. It counts RX message events, including RX
+title commands, since clearing that panel. It excludes TX and application log
+events. Hidden/filtered messages count; evicting history or rerendering does not
+reduce or increment the count. Project workspace `received_counts` preserves totals
+across reopening. For older projects without counters, totals initialize from the
+saved RX events; messages already discarded before saving cannot be counted.
+
+Right-click the panel header or log area for **Clear window** and **Hide window**.
+Clearing removes only that destination's retained messages from views, project
+saves and exports, and resets its counter; appearance, layout and depth are kept.
+General clearing includes unrouted/unknown-destination events retained there.
+Hiding continues receiving and counting messages; restore the panel through
+**Windows ▾**. The global Clear button still clears all histories and counters.
+
 ## Drag panels to rearrange
 
 Drag a panel's **header** onto another panel to swap their positions. Empty cells

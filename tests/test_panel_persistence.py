@@ -13,6 +13,8 @@ class PanelPersistenceTests(unittest.TestCase):
         w.active = True
         w.scope = ['12', '21']
         w.set_capacity('12', 12500)
+        w.set_appearance('12', {'background': '#abcdef', 'show_ts': False, 'show_linenum': True})
+        w.received_counts = {'12': 12345}
         w.panel_widths = {'11': 1300, '12': 700}
         w.row_heights = {'0': 1200, '1': 800}
         w.update_title('12', 'گیرنده')

@@ -75,3 +75,16 @@ class HistoryTests(unittest.TestCase):
         h.configure({'11': 1})
         h.append({'number': 4})
         self.assertTrue(h.evicted_recently)
+
+    def test_clear_panel_preserves_other_history_and_accepts_new_events(self):
+        h = EventHistory()
+        h.configure({'11': 2, '12': 2})
+        general = {'panel_id': 'unknown', 'data': b'general'}
+        h.append(general)
+        h.append({'panel_id': '12', 'data': b'target'})
+        h.clear_panel('12')
+        self.assertEqual(list(h), [general])
+        h.append({'panel_id': '12', 'data': b'new'})
+        self.assertEqual(len(h), 2)
+        h.clear_panel('11')
+        self.assertEqual(h[0]['data'], b'new')
