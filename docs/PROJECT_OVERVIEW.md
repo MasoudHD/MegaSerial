@@ -4,7 +4,7 @@
 
 MegaSerial is a cross-platform desktop serial monitor for embedded-device work. It connects to a serial port, renders RX/TX traffic, sends ASCII/HEX/binary payloads, stores shortcuts and history, runs response-aware command sequences, plots numeric telemetry, and imports/exports workspace data.
 
-The repository currently contains a Python 3.11+ application using PyQt6. The current release metadata identifies the application as version 1.0.0.
+The repository currently contains a Python 3.11+ application using PyQt6. The current release metadata identifies the application as version 2.0.0.
 
 ## Entry points and execution
 
