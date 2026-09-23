@@ -37,6 +37,98 @@ ON_TIMEOUT_CONTINUE = "continue"
 ON_TIMEOUT_STOP = "stop"
 ON_TIMEOUT_RETRY = "retry"
 
+# How often a whole sequence repeats. The loop wraps the full step list; it
+# never changes how an individual step advances, retries or fails.
+LOOP_NONE = "none"
+LOOP_COUNT = "count"
+LOOP_UNTIL_RX = "until_rx"
+LOOP_FOREVER = "forever"
+LOOP_MODES = (LOOP_NONE, LOOP_COUNT, LOOP_UNTIL_RX, LOOP_FOREVER)
+
+LOOP_LABELS = {
+    LOOP_NONE: "No loop (run once)",
+    LOOP_COUNT: "Repeat a fixed number of times",
+    LOOP_UNTIL_RX: "Repeat until a reply is received",
+    LOOP_FOREVER: "Repeat forever",
+}
+
+MIN_LOOP_COUNT = 1
+MAX_LOOP_COUNT = 1_000_000
+MAX_LOOP_DELAY_MS = 3_600_000
+
+
+def _clamp_int(value, low: int, high: int, default: int) -> int:
+    try:
+        number = int(str(value).strip())
+    except (TypeError, ValueError):
+        return default
+    return max(low, min(high, number))
+
+
+@dataclass
+class SequenceLoop:
+    """Loop configuration for one whole sequence.
+
+    Values are normalized on construction, so an out-of-range repeat count or an
+    unknown mode can never reach the runner.
+    """
+
+    mode: str = LOOP_NONE
+    count: int = 1
+    until_rx: str = ""
+    until_rx_fmt: str = utils.FORMAT_ASCII
+    delay_ms: int = 0
+
+    def __post_init__(self) -> None:
+        if self.mode not in LOOP_MODES:
+            self.mode = LOOP_NONE
+        self.count = _clamp_int(self.count, MIN_LOOP_COUNT, MAX_LOOP_COUNT, MIN_LOOP_COUNT)
+        self.delay_ms = _clamp_int(self.delay_ms, 0, MAX_LOOP_DELAY_MS, 0)
+        self.until_rx = self.until_rx or ""
+        self.until_rx_fmt = utils.normalize_format(self.until_rx_fmt)
+
+    @property
+    def repeats(self) -> bool:
+        return self.mode != LOOP_NONE
+
+    def until_rx_bytes(self) -> bytes:
+        """Pattern that ends the loop, or empty when the mode does not use one."""
+        if self.mode != LOOP_UNTIL_RX or not self.until_rx:
+            return b""
+        return utils.parse_input(self.until_rx, self.until_rx_fmt)
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d) -> "SequenceLoop":
+        if isinstance(d, cls):
+            return cls(**asdict(d))
+        if not isinstance(d, dict):
+            return cls()
+        return cls(
+            mode=str(d.get("mode", LOOP_NONE) or LOOP_NONE),
+            count=d.get("count", MIN_LOOP_COUNT),
+            until_rx=str(d.get("until_rx", "") or ""),
+            until_rx_fmt=d.get("until_rx_fmt", utils.FORMAT_ASCII),
+            delay_ms=d.get("delay_ms", 0),
+        )
+
+
+def loop_from_settings(settings: dict) -> SequenceLoop:
+    """Read the Sequence tab's loop config, migrating pre-loop-mode settings.
+
+    Older settings only had a ``sequence_loop`` flag, which meant "repeat until
+    stopped", so it maps to :data:`LOOP_FOREVER`.
+    """
+    raw = settings.get("sequence_loop_config")
+    if isinstance(raw, dict):
+        return SequenceLoop.from_dict(raw)
+    return SequenceLoop(
+        mode=LOOP_FOREVER if settings.get("sequence_loop", False) else LOOP_NONE,
+        delay_ms=settings.get("sequence_loop_delay_ms", 0),
+    )
+
 
 @dataclass
 class Step:
@@ -44,6 +136,7 @@ class Step:
     data: str = ""
     fmt: str = utils.FORMAT_ASCII
     line_ending: str = "CRLF (\\r\\n)"
+    custom_suffix: str = ""    # appended when line_ending is "Custom"
     enabled: bool = True
     advance: str = ADVANCE_TIME
     delay_ms: int = 1000
@@ -57,7 +150,7 @@ class Step:
     fail_on: str = ""          # if this reply is seen first, the step fails fast
 
     def payload_bytes(self) -> bytes:
-        return utils.parse_input(self.data, self.fmt) + utils.LINE_ENDINGS.get(self.line_ending, b"")
+        return utils.build_payload(self.data, self.fmt, self.line_ending, self.custom_suffix)
 
     def expect_bytes(self) -> bytes:
         if not self.expect:
@@ -111,20 +204,33 @@ class NamedSequence:
     """A named list of steps, used in the Sequence Group tab."""
     name: str = "Sequence"
     steps: list[Step] = field(default_factory=list)
+    # Whether the group run includes this sequence. Independent of Step.enabled.
+    enabled: bool = True
+    loop: SequenceLoop = field(default_factory=SequenceLoop)
 
     def to_dict(self) -> dict:
-        return {"name": self.name, "steps": [s.to_dict() for s in self.steps]}
+        return {
+            "name": self.name,
+            "steps": [s.to_dict() for s in self.steps],
+            "enabled": self.enabled,
+            "loop": self.loop.to_dict(),
+        }
 
     @classmethod
     def from_dict(cls, d: dict) -> "NamedSequence":
         steps = [Step.from_dict(s) for s in d.get("steps", [])]
-        return cls(name=d.get("name", "Sequence") or "Sequence", steps=steps)
+        # Groups written before these fields existed run every sequence once.
+        raw_enabled = d.get("enabled", True)
+        enabled = (raw_enabled if isinstance(raw_enabled, bool)
+                   else str(raw_enabled).strip().lower() in ("1", "true", "yes", "y", "on"))
+        return cls(name=d.get("name", "Sequence") or "Sequence", steps=steps,
+                   enabled=enabled, loop=SequenceLoop.from_dict(d.get("loop")))
 
 
 CSV_FIELDS = [
     "name", "data", "fmt", "line_ending", "enabled", "advance", "delay_ms",
     "expect", "expect_fmt", "timeout_ms", "on_timeout", "max_retries", "beep_on_match",
-    "fail_on",
+    "fail_on", "custom_suffix",
 ]
 
 
@@ -167,6 +273,17 @@ class RxMonitor:
     def mark(self) -> int:
         with self._lock:
             return len(self._buffer)
+
+    def contains(self, pattern: bytes, start_index: int = 0) -> bool:
+        """Non-blocking check for ``pattern`` in everything received since *start_index*.
+
+        Uses the same accumulated buffer as :meth:`wait_for`, so a pattern split
+        across several received chunks still matches.
+        """
+        if not pattern:
+            return False
+        with self._lock:
+            return pattern in bytes(self._buffer[start_index:])
 
     def wait_for(self, pattern: bytes, start_index: int, timeout: float,
                  stop_event: threading.Event) -> bool:
@@ -228,14 +345,13 @@ class SequenceRunner(QThread):
     _SEND_WAIT_S = 25.0
 
     def __init__(self, steps: list[Step], send_fn, rx: RxMonitor,
-                 loop: bool = False, loop_delay_ms: int = 0):
+                 loop: "SequenceLoop | dict | None" = None):
         super().__init__()
         self._steps = [s for s in steps if s.enabled]
         self._all_indices = [i for i, s in enumerate(steps) if s.enabled]
         self._send = send_fn
         self._rx = rx
-        self._loop = loop
-        self._loop_delay_ms = loop_delay_ms
+        self._loop = SequenceLoop.from_dict(loop) if loop is not None else SequenceLoop()
         self._stop = threading.Event()
 
     def request_stop(self) -> None:
@@ -272,11 +388,20 @@ class SequenceRunner(QThread):
             self.finished_all.emit(False)
             return
 
+        try:
+            until_pattern = self._loop.until_rx_bytes()
+        except utils.ParseError as exc:
+            self.log.emit(f"Invalid loop termination pattern: {exc}", "error")
+            self.finished_all.emit(False)
+            return
+        # Anchor before the first pass so a reply arriving mid-sequence counts.
+        rx_mark = self._rx.mark() if until_pattern else 0
+
         completed = True
         pass_num = 0
         while not self._stop.is_set():
             pass_num += 1
-            if self._loop:
+            if self._loop.repeats:
                 self.log.emit(f"--- Sequence pass #{pass_num} ---", "info")
             for pos, (orig_idx, step) in enumerate(zip(self._all_indices, self._steps)):
                 if self._stop.is_set():
@@ -288,13 +413,33 @@ class SequenceRunner(QThread):
                     completed = False
                     self._stop.set()
                     break
-            if self._stop.is_set() or not self._loop:
+            # A stop request or an aborting step ends the run; the loop never
+            # swallows that outcome.
+            if self._stop.is_set():
                 break
-            if self._loop_delay_ms:
-                if self._sleep(self._loop_delay_ms):
-                    break
+            if not self._should_repeat(pass_num, until_pattern, rx_mark):
+                break
+            if self._loop.delay_ms and self._sleep(self._loop.delay_ms):
+                break
 
         self.finished_all.emit(completed)
+
+    def _should_repeat(self, pass_num: int, until_pattern: bytes, rx_mark: int) -> bool:
+        """Decide whether another full pass of the sequence should start."""
+        mode = self._loop.mode
+        if mode == LOOP_FOREVER:
+            return True
+        if mode == LOOP_COUNT:
+            return pass_num < self._loop.count
+        if mode == LOOP_UNTIL_RX:
+            if not until_pattern:
+                return False   # nothing to wait for: behave like a single run
+            if self._rx.contains(until_pattern, rx_mark):
+                self.log.emit(
+                    f"Loop ended: received {utils.human_preview(until_pattern)}", "info")
+                return False
+            return True
+        return False
 
     def _run_step(self, idx: int, step: Step) -> bool:
         """Execute one step. Returns False to abort the whole sequence."""
@@ -407,7 +552,8 @@ class SequenceGroupRunner(QThread):
             return
 
         total_steps = sum(
-            len([s for s in seq.steps if s.enabled]) for seq in self._sequences
+            len([s for s in seq.steps if s.enabled])
+            for seq in self._sequences if seq.enabled
         )
         if total_steps == 0:
             self.log.emit("No enabled steps in the sequence group.", "warn")
@@ -428,6 +574,10 @@ class SequenceGroupRunner(QThread):
                     completed = False
                     break
 
+                if not seq.enabled:
+                    self.log.emit(f"[{seq.name}] skipped (disabled)", "info")
+                    continue
+
                 enabled = [s for s in seq.steps if s.enabled]
                 if not enabled:
                     self.log.emit(f"[{seq.name}] skipped (no enabled steps)", "info")
@@ -436,7 +586,7 @@ class SequenceGroupRunner(QThread):
                 self.sequence_started.emit(seq_idx, seq.name)
                 self.log.emit(f"=== Running sequence: {seq.name} ===", "info")
 
-                runner = SequenceRunner(seq.steps, self._send, self._rx, loop=False)
+                runner = SequenceRunner(seq.steps, self._send, self._rx, loop=seq.loop)
                 self._current_runner = runner
 
                 def _on_step_started(idx: int, name: str, _si=seq_idx) -> None:
@@ -465,7 +615,11 @@ class SequenceGroupRunner(QThread):
                 if self._stop.is_set():
                     break
 
-                if seq_idx < len(self._sequences) - 1 and self._delay_between_ms:
+                more_to_run = any(
+                    later.enabled and any(s.enabled for s in later.steps)
+                    for later in self._sequences[seq_idx + 1:]
+                )
+                if more_to_run and self._delay_between_ms:
                     self.log.emit(
                         f"Waiting {self._delay_between_ms} ms before next sequence…", "info")
                     if self._sleep(self._delay_between_ms):

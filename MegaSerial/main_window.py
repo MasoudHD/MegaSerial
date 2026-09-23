@@ -3,28 +3,41 @@ shortcuts and the sequence runner."""
 from __future__ import annotations
 
 import json
-from collections import deque
+from copy import deepcopy
+from itertools import islice
 from datetime import datetime
+from pathlib import Path
 
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QFormLayout,
     QGroupBox, QLabel, QComboBox, QPushButton, QCheckBox, QLineEdit,
     QSplitter, QTabWidget, QListWidget, QListWidgetItem, QTableWidget,
     QTableWidgetItem, QHeaderView, QProgressBar, QSpinBox, QFileDialog,
-    QMessageBox, QAbstractItemView, QSizePolicy,
+    QMessageBox, QAbstractItemView, QSizePolicy, QStackedWidget,
 )
 
 from . import config, theme, utils, sound, __app_name__, __version__
+from .event_history import EventHistory
 from .serial_worker import SerialWorker, SerialConfig, available_ports, port_hwid
 from .sequence import (
     Step, NamedSequence, SequenceRunner, SequenceGroupRunner, RxMonitor,
-    ADVANCE_LABELS, steps_to_csv, steps_from_csv,
+    ADVANCE_LABELS, LOOP_FOREVER, loop_from_settings, steps_to_csv, steps_from_csv,
 )
 from .about import AboutDialog, DonationDialog
-from .dialogs import ShortcutDialog, StepDialog, SequenceEditorDialog
-from .monitor import MonitorView, compile_filter, event_matches_filter
+from .dialogs import (
+    ShortcutDialog, StepDialog, SequenceEditorDialog, SequenceLoopControls,
+)
+from .monitor import (
+    MonitorView, compile_filter, event_matches_filter, clamp_font_point_size,
+    write_events_csv, DEFAULT_FONT_POINT_SIZE,
+)
+from .panel_protocol import PanelProtocolParser, panel_event
+from .protocol_profiles import ProtocolDecoder
+from .protocol_dialog import ProtocolDialog, PROFILE_LABELS
+from .panel_model import PanelWorkspace
+from .panel_view import PanelView
 from .graph_panel import GraphPanel
 from .icons import app_logo_pixmap
 from . import project as project_io
@@ -34,11 +47,28 @@ BAUD_RATES = ["300", "1200", "2400", "4800", "9600", "19200", "38400",
 MAX_EVENTS = 6000
 MAX_HISTORY = 200
 
+BASE_WINDOW_TITLE = f"{__app_name__} v{__version__} - Serial Monitor"
+
+
+def window_title(project_path: str | None) -> str:
+    """Window title for the given active project file, or none."""
+    if not project_path:
+        return BASE_WINDOW_TITLE
+    return f"{__app_name__} v{__version__} — {Path(project_path).name}"
+
+# Column layout of the Sequence Group table.
+GROUP_COL_ON = 0
+GROUP_COL_NAME = 1
+GROUP_COL_STEPS = 2
+GROUP_COL_SEND = 3
+GROUP_COL_STATUS = 4
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.cfg = config.load()
+        self._config_snapshot = deepcopy(self.cfg)
         self.worker: SerialWorker | None = None
         self.rx_monitor = RxMonitor()
         self.runner: SequenceRunner | None = None
@@ -49,21 +79,30 @@ class MainWindow(QMainWindow):
             NamedSequence.from_dict(d) for d in self.cfg.get("sequence_groups", [])
         ]
         self.history: list[dict] = list(self.cfg.get("history", []))
-        self.events: deque = deque(maxlen=MAX_EVENTS)
+        self.events = EventHistory(recent_limit=MAX_EVENTS)
         self._filter_regex = None
         self._building_table = False
+        self._building_group_table = False
         self._history_nav_index = -1  # -1 = not navigating
         self._history_nav_pending = ""  # text before navigation started
         self._history_nav_setting = False  # guard for programmatic text changes
         self.mode = "dark"
         self.colors = theme.COLORS["dark"]
+        self._monitor_font_pt = clamp_font_point_size(
+            self.cfg.get("monitor_font_point_size", DEFAULT_FONT_POINT_SIZE))
         # RX line-assembly (line mode)
         self._rx_buf = bytearray()
+        self._rx_line_start = True
+        self._panel_parser = PanelProtocolParser()
+        self._protocol_decoder = ProtocolDecoder()
         self._rx_flush_timer = QTimer(self)
         self._rx_flush_timer.setSingleShot(True)
         self._rx_flush_timer.timeout.connect(self._flush_rx_buffer)
 
-        self.setWindowTitle(f"{__app_name__} v{__version__} - Serial Monitor")
+        # Path of the .msproj currently open, set only by opening or saving one.
+        # Deliberately not derived from the saved config, which may be stale.
+        self._project_path: str | None = None
+        self.setWindowTitle(window_title(None))
         self.resize(1280, 780)
         self._build_ui()
         self._load_settings_into_ui()
@@ -111,6 +150,7 @@ class MainWindow(QMainWindow):
         self._history_nav_setting = False
         self.send_fmt_combo.setCurrentText(utils.normalize_format(entry.get("fmt", "ASCII")))
         self.line_ending_combo.setCurrentText(entry.get("line_ending", "CRLF (\\r\\n)"))
+        self.custom_suffix_edit.setText(entry.get("custom_suffix", ""))
 
     def _on_send_input_changed(self, _text: str) -> None:
         if not self._history_nav_setting:
@@ -308,9 +348,28 @@ class MainWindow(QMainWindow):
         self.clear_btn.clicked.connect(self.clear_monitor)
         self.save_btn = QPushButton("Save log")
         self.save_btn.clicked.connect(self.save_log)
+        self.save_csv_btn = QPushButton("Export CSV")
+        self.save_csv_btn.setToolTip("Export the shown log entries as structured CSV")
+        self.save_csv_btn.clicked.connect(self.export_log_csv)
         tb.addWidget(self.clear_btn)
         tb.addWidget(self.save_btn)
+        tb.addWidget(self.save_csv_btn)
         v.addLayout(tb)
+
+        mode_row = QHBoxLayout()
+        self.presentation_combo = QComboBox()
+        self.presentation_combo.addItems(["Normal Monitor View", "Panel View"])
+        self.presentation_combo.currentIndexChanged.connect(self._on_presentation_changed)
+        mode_row.addWidget(self.presentation_combo)
+        self.panel_config_btn = QPushButton("Configure panels…")
+        self.panel_config_btn.hide()
+        mode_row.addWidget(self.panel_config_btn)
+        self.protocol_btn = QPushButton("Protocol: MegaSerial…")
+        self.protocol_btn.clicked.connect(self._configure_protocol)
+        self.protocol_btn.hide()
+        mode_row.addWidget(self.protocol_btn)
+        mode_row.addStretch(1)
+        v.addLayout(mode_row)
 
         # regex filter row
         fb = QHBoxLayout()
@@ -331,6 +390,16 @@ class MainWindow(QMainWindow):
         self.filter_dir_combo.currentIndexChanged.connect(self._on_filter_changed)
         fb.addWidget(self.filter_check)
         fb.addWidget(self.filter_pattern, 1)
+        self.panel_view = PanelView(self._monitor_font_pt, self.zoom_monitor)
+        self.panel_view.changed.connect(self._on_panel_workspace_changed)
+        self.panel_view.clear_requested.connect(self._clear_panel)
+        self.panel_config_btn.clicked.connect(self.panel_view.configure)
+        fb.addWidget(self.panel_view.scope_button)
+        self.panel_view.scope_button.hide()
+        mode_row.insertWidget(2, self.panel_view.auto_check)
+        self.panel_view.auto_check.hide()
+        mode_row.insertWidget(3, self.panel_view.windows_button)
+        self.panel_view.windows_button.hide()
         fb.addWidget(self.filter_dir_combo)
         fb.addWidget(self.filter_ci_check)
         fb.addWidget(self.filter_status)
@@ -341,16 +410,24 @@ class MainWindow(QMainWindow):
         self.view_splitter = QSplitter(Qt.Orientation.Horizontal)
         self.view1 = MonitorView(fmt=self.cfg.get("view1_format", "ASCII"),
                                  bytes_per_row=self.cfg.get("view1_bytes_per_row", 16),
-                                 on_settings_changed=self._rerender_view)
+                                 on_settings_changed=self._rerender_view,
+                                 font_point_size=self._monitor_font_pt,
+                                 on_zoom_requested=self.zoom_monitor)
         self.view2 = MonitorView(fmt=self.cfg.get("view2_format", "HEX"),
                                  bytes_per_row=self.cfg.get("view2_bytes_per_row", 16),
-                                 on_settings_changed=self._rerender_view)
+                                 on_settings_changed=self._rerender_view,
+                                 font_point_size=self._monitor_font_pt,
+                                 on_zoom_requested=self.zoom_monitor)
         self.view_splitter.addWidget(self.view1)
         self.view_splitter.addWidget(self.view2)
         self.views = [self.view1, self.view2]
+        self._install_zoom_shortcuts()
         self.graph_panel = GraphPanel()
         self.graph_panel.mode_combo.currentIndexChanged.connect(self._on_graph_settings_changed)
-        self.center_splitter.addWidget(self.view_splitter)
+        self.presentation_stack = QStackedWidget()
+        self.presentation_stack.addWidget(self.view_splitter)
+        self.presentation_stack.addWidget(self.panel_view)
+        self.center_splitter.addWidget(self.presentation_stack)
         self.center_splitter.addWidget(self.graph_panel)
         self.center_splitter.setStretchFactor(0, 3)
         self.center_splitter.setStretchFactor(1, 2)
@@ -374,8 +451,17 @@ class MainWindow(QMainWindow):
         self.send_fmt_combo.addItems(utils.FORMATS)
         row.addWidget(self.send_fmt_combo)
         self.line_ending_combo = QComboBox()
-        self.line_ending_combo.addItems(utils.LINE_ENDINGS.keys())
+        self.line_ending_combo.addItems(utils.LINE_ENDING_LABELS)
+        self.line_ending_combo.currentTextChanged.connect(self._sync_custom_suffix)
         row.addWidget(self.line_ending_combo)
+        # Only shown for the "Custom" line ending, so the send bar stays compact.
+        self.custom_suffix_edit = QLineEdit()
+        self.custom_suffix_edit.setPlaceholderText("Suffix, e.g. \\r\\n or \\x00")
+        self.custom_suffix_edit.setToolTip(
+            "Bytes appended after the payload. Supports \\r \\n \\t \\0 and \\xNN escapes.")
+        self.custom_suffix_edit.setMaximumWidth(160)
+        self.custom_suffix_edit.setVisible(False)
+        row.addWidget(self.custom_suffix_edit)
         self.send_btn = QPushButton("Send")
         self.send_btn.setObjectName("accent")
         self.send_btn.clicked.connect(self.send_current)
@@ -481,16 +567,8 @@ class MainWindow(QMainWindow):
         io_row.addWidget(self.export_btn)
         v.addLayout(io_row)
 
-        loop_row = QHBoxLayout()
-        self.loop_check = QCheckBox("Loop")
-        loop_row.addWidget(self.loop_check)
-        loop_row.addWidget(QLabel("Loop delay"))
-        self.loop_delay = QSpinBox()
-        self.loop_delay.setRange(0, 3_600_000)
-        self.loop_delay.setSuffix(" ms")
-        loop_row.addWidget(self.loop_delay)
-        loop_row.addStretch(1)
-        v.addLayout(loop_row)
+        self.loop_controls = SequenceLoopControls()
+        v.addWidget(self.loop_controls)
 
         self.seq_progress = QProgressBar()
         self.seq_progress.setTextVisible(True)
@@ -519,16 +597,17 @@ class MainWindow(QMainWindow):
         hint.setStyleSheet("color: palette(mid);")
         v.addWidget(hint)
 
-        self.group_table = QTableWidget(0, 4)
-        self.group_table.setHorizontalHeaderLabels(["Name", "Steps", "Send", "Status"])
+        self.group_table = QTableWidget(0, 5)
+        self.group_table.setHorizontalHeaderLabels(["On", "Name", "Steps", "Send", "Status"])
         self.group_table.verticalHeader().setVisible(False)
         self.group_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.group_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.group_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.group_table.doubleClicked.connect(lambda _: self.edit_group_sequence())
+        self.group_table.itemChanged.connect(self._on_group_item_changed)
         gh = self.group_table.horizontalHeader()
-        gh.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        for c in (1, 2, 3):
+        gh.setSectionResizeMode(GROUP_COL_NAME, QHeaderView.ResizeMode.Stretch)
+        for c in (GROUP_COL_ON, GROUP_COL_STEPS, GROUP_COL_SEND, GROUP_COL_STATUS):
             gh.setSectionResizeMode(c, QHeaderView.ResizeMode.ResizeToContents)
         v.addWidget(self.group_table, 1)
 
@@ -575,6 +654,8 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------ settings <-> UI
     def _load_settings_into_ui(self) -> None:
         c = self.cfg
+        self._monitor_font_pt = clamp_font_point_size(
+            c.get("monitor_font_point_size", DEFAULT_FONT_POINT_SIZE))
         self.theme_combo.setCurrentText(c.get("theme", "system").capitalize())
         self._apply_theme(c.get("theme", "system"))
         self.baud_combo.setCurrentText(str(c.get("baudrate", 115200)))
@@ -593,8 +674,9 @@ class MainWindow(QMainWindow):
         self.linemode_check.setChecked(c.get("line_mode", True))
         self.send_fmt_combo.setCurrentText(c.get("send_format", "ASCII"))
         self.line_ending_combo.setCurrentText(c.get("line_ending", "CRLF (\\r\\n)"))
-        self.loop_check.setChecked(c.get("sequence_loop", False))
-        self.loop_delay.setValue(c.get("sequence_loop_delay_ms", 0))
+        self.custom_suffix_edit.setText(c.get("line_ending_custom_suffix", ""))
+        self._sync_custom_suffix()
+        self.loop_controls.set_loop(loop_from_settings(c))
         self.group_delay.setValue(c.get("group_delay_ms", 0))
         self.group_loop_check.setChecked(c.get("group_loop", False))
         self.project_name_edit.setText(c.get("project_name", ""))
@@ -621,9 +703,11 @@ class MainWindow(QMainWindow):
             "show_direction": self.dir_check.isChecked(),
             "autoscroll": self.autoscroll_check.isChecked(),
             "show_line_numbers": self.linenum_check.isChecked(),
+            "monitor_font_point_size": self._monitor_font_pt,
             "line_mode": self.linemode_check.isChecked(),
             "send_format": self.send_fmt_combo.currentText(),
             "line_ending": self.line_ending_combo.currentText(),
+            "line_ending_custom_suffix": self.custom_suffix_edit.text(),
             "last_port": self.port_combo.currentData() or self.port_combo.currentText(),
             "baudrate": int(self.baud_combo.currentText() or 115200),
             "bytesize": int(self.databits_combo.currentText()),
@@ -635,8 +719,11 @@ class MainWindow(QMainWindow):
             "shortcuts": self.shortcuts,
             "history": self.history,
             "sequence": [s.to_dict() for s in self.steps],
-            "sequence_loop": self.loop_check.isChecked(),
-            "sequence_loop_delay_ms": self.loop_delay.value(),
+            "sequence_loop_config": self.loop_controls.loop().to_dict(),
+            # Kept with their original meaning so older builds reading this file
+            # still only loop forever when that is what was selected.
+            "sequence_loop": self.loop_controls.loop().mode == LOOP_FOREVER,
+            "sequence_loop_delay_ms": self.loop_controls.loop().delay_ms,
             "sequence_groups": [s.to_dict() for s in self.sequence_groups],
             "group_delay_ms": self.group_delay.value(),
             "group_loop": self.group_loop_check.isChecked(),
@@ -667,6 +754,8 @@ class MainWindow(QMainWindow):
         if hasattr(self, "graph_panel"):
             self.graph_panel.apply_theme(self.mode)
         if hasattr(self, "views"):
+            # The theme stylesheet resets widget fonts, so restore the zoom level.
+            self._apply_monitor_zoom()
             self._rerender_all()
 
     # ----------------------------------------------------------- ports/conn
@@ -752,6 +841,8 @@ class MainWindow(QMainWindow):
         self.worker.set_rts(self.rts_btn.isChecked())
 
     def on_serial_closed(self) -> None:
+        self._flush_rx_buffer(force=True)
+        self._rx_line_start = True
         self.connect_btn.setEnabled(True)
         self.connect_btn.setText("Connect")
         self._set_connected_ui(False)
@@ -791,8 +882,80 @@ class MainWindow(QMainWindow):
             "colors": self.colors,
         }
 
+    def _on_presentation_changed(self, index):
+        self.panel_view.workspace.active = index == 1
+        self.presentation_stack.setCurrentIndex(index)
+        self.panel_view.scope_button.setVisible(index == 1)
+        self.panel_view.windows_button.setVisible(index == 1)
+        self.panel_view.auto_check.setVisible(index == 1)
+        self.panel_config_btn.setVisible(index == 1)
+        self.protocol_btn.setVisible(index == 1)
+        self.split_check.setEnabled(index == 0)
+        self._rerender_all()
+
+    def _configure_protocol(self):
+        dialog = ProtocolDialog(self.panel_view.workspace.protocol_profile,
+                                self.panel_view.workspace.titles(),
+                                latest_rx=lambda: next((e["data"] for e in reversed(self.events)
+                                                        if e.get("dir") == "rx" and "data" in e), b""),
+                                parent=self)
+        if dialog.exec():
+            state = self.panel_view.workspace.to_dict()
+            state["protocol_profile"] = dialog.result_profile
+            if (dialog.result_profile["kind"] == "zmonitor" and dialog.layout_check.isChecked()
+                    and not self.panel_view.workspace.automatic):
+                defaults = PanelWorkspace({"max_columns": 4, "row_counts": [4, 4, 4, 4]})
+                old = {p["id"]: p for p in state["panels"]}
+                state.update(max_columns=4, row_counts=[4, 4, 4, 4],
+                             panels=[old.get(p["id"], p) for p in defaults.panels])
+            self.panel_view.set_workspace(PanelWorkspace(state))
+
+    def _on_panel_workspace_changed(self):
+        self.events.configure(self.panel_view.workspace.capacities())
+        self.panel_config_btn.setEnabled(not self.panel_view.workspace.automatic)
+        profile = self.panel_view.workspace.protocol_profile
+        if profile != self._protocol_decoder.profile:
+            self._flush_rx_buffer(force=True)
+            self._rx_flush_timer.stop()
+            self._protocol_decoder = ProtocolDecoder(profile)
+            self._rx_line_start = True
+        self.protocol_btn.setText(f"Protocol: {PROFILE_LABELS[profile['kind']]}…")
+        self.linemode_check.setEnabled(profile["kind"] == "megaserial")
+        self._rerender_all()
+
+    def _append_protocol_packet(self, packet):
+        ev = {"type": "data", "dir": "rx", "ts": datetime.now(), **packet}
+        if ev.get("panel_control"):
+            self.panel_view.apply_control(ev)
+        if ev.get("panel_id") and ev["panel_id"] not in self.panel_view.widgets:
+            ev["protocol_diagnostic"] = "Destination panel is not configured; displayed in General"
+        if ev.get("protocol_diagnostic"):
+            self.protocol_btn.setToolTip(ev["protocol_diagnostic"])
+        self._emit_event(ev)
+
+    def _panel_filtered_events(self):
+        return (ev for ev in self.events
+                if not (ev.get("panel_control") and ev.get("panel_id") in self.panel_view.widgets)
+                and self.panel_view.workspace.accepts(panel_event(ev), self._event_passes_filter))
+
     def _active_views(self) -> list:
         return self.views if self.split_check.isChecked() else [self.view1]
+
+    # ------------------------------------------------------------ monitor zoom
+    def _install_zoom_shortcuts(self) -> None:
+        for keys, steps in (("Ctrl++", 1), ("Ctrl+=", 1), ("Ctrl+-", -1), ("Ctrl+_", -1)):
+            sc = QShortcut(QKeySequence(keys), self)
+            sc.activated.connect(lambda s=steps: self.zoom_monitor(s))
+
+    def zoom_monitor(self, steps: int) -> int:
+        """Change the shared monitor font size so both views stay in step."""
+        self._monitor_font_pt = clamp_font_point_size(self._monitor_font_pt + steps)
+        self._apply_monitor_zoom()
+        return self._monitor_font_pt
+
+    def _apply_monitor_zoom(self) -> None:
+        for view in [*self.views, self.panel_view]:
+            view.set_font_point_size(self._monitor_font_pt)
 
     def _compile_filter(self) -> None:
         pattern = self.filter_pattern.text()
@@ -818,7 +981,8 @@ class MainWindow(QMainWindow):
             ev, self._filter_regex, self.filter_dir_combo.currentData() or "all")
 
     def _filtered_events(self):
-        return (ev for ev in self.events if self._event_passes_filter(ev))
+        return (ev for ev in reversed(list(islice(reversed(self.events), MAX_EVENTS)))
+                if self._event_passes_filter(ev))
 
     def _on_filter_changed(self, *_args) -> None:
         self._compile_filter()
@@ -839,19 +1003,36 @@ class MainWindow(QMainWindow):
         self.graph_panel.replay_events(self.events)
 
     def _emit_event(self, ev: dict) -> None:
-        visible = list(self._filtered_events())
-        prev_ts = visible[-1]["ts"] if visible else None
-        self.events.append(ev)
+        ident = self.panel_view.workspace.record_received(ev)
+        if ident is not None:
+            self.panel_view.refresh_counter(ident)
+        self.panel_view.observe_event(ev)
+        previous = next((event for event in islice(reversed(self.events), MAX_EVENTS)
+                         if self._event_passes_filter(event)), None)
+        prev_ts = previous["ts"] if previous else None
+        evicted = self.events.append(ev)
         opts = self._global_opts()
-        if self._event_passes_filter(ev):
+        if evicted is not None and self.events.evicted_recently and not self.panel_view.workspace.active:
+            for view in self._active_views():
+                view.rerender(self._filtered_events(), opts)
+        elif self._event_passes_filter(ev):
             for view in self._active_views():
                 view.append_event(ev, opts, prev_ts)
+        if self.panel_view.workspace.active:
+            scroll_state = self.panel_view.forget_event(evicted) if evicted is not None else None
+            self.panel_view.append_event(ev, opts, self._event_passes_filter)
+            if scroll_state is not None:
+                ident, state = scroll_state
+                self.panel_view.widgets[ident].monitor.restore_scroll(state, opts)
         if self.graph_view_check.isChecked():
             self.graph_panel.feed_event(ev)
 
     def on_data_received(self, data: bytes) -> None:
         self.rx_monitor.feed(data)   # raw stream for sequence response matching
-        if self.linemode_check.isChecked():
+        if self._protocol_decoder.profile["kind"] != "megaserial":
+            for packet in self._protocol_decoder.feed(data):
+                self._append_protocol_packet(packet)
+        elif self.linemode_check.isChecked():
             self._ingest_rx_lines(data)
         else:
             self._append_data("rx", data)
@@ -866,28 +1047,55 @@ class MainWindow(QMainWindow):
             line = bytes(self._rx_buf[:idx + 1])
             del self._rx_buf[:idx + 1]
             if line.strip(b"\r\n"):
-                self._append_data("rx", line)
+                self._append_data("rx", line, complete_line=self._rx_line_start)
+            self._rx_line_start = True
+        if len(self._rx_buf) > 65536:
+            self._flush_rx_buffer(force=True)
         if self._rx_buf:
             self._rx_flush_timer.start(150)
         else:
             self._rx_flush_timer.stop()
 
-    def _flush_rx_buffer(self) -> None:
+    def _flush_rx_buffer(self, force=False) -> None:
         """Emit any buffered partial line (called on timeout or mode change)."""
+        if self._protocol_decoder.profile["kind"] != "megaserial":
+            if force:
+                for packet in self._protocol_decoder.flush():
+                    self._append_protocol_packet(packet)
+            return
         if not self._rx_buf:
             return
         line = bytes(self._rx_buf)
+        # A potential protocol line may span arbitrarily slow serial reads.
+        # Keep it until LF, with a 64 KiB cap; never parse timeout fragments.
+        if not force and self._rx_line_start and len(line) <= 65536 and any(
+                prefix.startswith(line) or line.startswith(prefix)
+                for prefix in (b"@PANEL:", b"@PANEL_TITLE:")):
+            return
         self._rx_buf.clear()
+        self._rx_line_start = False
         if line.strip(b"\r\n"):
             self._append_data("rx", line)
 
     def _on_linemode_toggled(self, on: bool) -> None:
-        self._flush_rx_buffer()
+        self._flush_rx_buffer(force=True)
+        self._rx_line_start = True
         if not on:
             self._rx_flush_timer.stop()
 
-    def _append_data(self, direction: str, data: bytes) -> None:
-        self._emit_event({"type": "data", "dir": direction, "ts": datetime.now(), "data": data})
+    def _append_data(self, direction: str, data: bytes, *, complete_line=False) -> None:
+        ev = {"type": "data", "dir": direction, "ts": datetime.now(), "data": data}
+        if direction == "rx" and complete_line:
+            command = self._panel_parser.parse(data)
+            if command.kind != "normal":
+                ev["panel_id"] = command.panel_id
+                if command.kind == "data":
+                    ev["panel_payload"] = command.text
+                else:
+                    ev["panel_title"] = command.text
+                    if self.panel_view.workspace.update_title(command.panel_id, command.text):
+                        self.panel_view.refresh_titles()
+        self._emit_event(ev)
 
     def _log_line(self, kind: str, message: str) -> None:
         self._emit_event({"type": "log", "kind": kind, "ts": datetime.now(), "msg": message})
@@ -899,6 +1107,8 @@ class MainWindow(QMainWindow):
         opts = self._global_opts()
         for view in self._active_views():
             view.rerender(self._filtered_events(), opts)
+        if self.panel_view.workspace.active:
+            self.panel_view.rerender(self.events, opts, self._event_passes_filter)
 
     def _on_split_toggled(self, checked: bool) -> None:
         self.view2.setVisible(checked)
@@ -908,8 +1118,27 @@ class MainWindow(QMainWindow):
                 total = max(self.view_splitter.width(), 400)
                 self.view_splitter.setSizes([total // 2, total // 2])
 
+    def _clear_panel(self, ident):
+        if ident not in self.panel_view.widgets:
+            return
+        self.events.clear_panel(ident)
+        self.panel_view.clear_panel(ident)
+        for view in self.views:
+            self._rerender_view(view)
+        if self.graph_view_check.isChecked():
+            self._replay_graph()
+
     def clear_monitor(self) -> None:
         self.events.clear()
+        self.panel_view.workspace.received_counts.clear()
+        for ident in self.panel_view.widgets:
+            self.panel_view.refresh_counter(ident)
+        self._rx_buf.clear()
+        self._rx_line_start = True
+        self._rx_flush_timer.stop()
+        self._protocol_decoder = ProtocolDecoder(self.panel_view.workspace.protocol_profile)
+        self.panel_view.clear()
+        self.panel_view.reset_discovery()
         for view in self.views:
             view.clear()
         self.graph_panel.clear()
@@ -921,10 +1150,28 @@ class MainWindow(QMainWindow):
             return
         try:
             with open(path, "w", encoding="utf-8") as fh:
-                fh.write(self.view1.plain_text())
+                fh.write(self.panel_view.plain_text() if self.panel_view.workspace.active
+                         else self.view1.plain_text())
             self.status.showMessage(f"Log saved to {path}", 5000)
         except OSError as exc:
             QMessageBox.warning(self, "Save failed", str(exc))
+
+    def export_log_csv(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(self, "Export log CSV", "serial-log.csv",
+                                              "CSV files (*.csv);;All files (*)")
+        if not path:
+            return
+        if not path.lower().endswith(".csv"):
+            path += ".csv"
+        try:
+            if self.panel_view.workspace.active:
+                count = write_events_csv(path, self._panel_filtered_events(),
+                                         self.panel_view.workspace.titles())
+            else:
+                count = write_events_csv(path, self._filtered_events())
+            self.status.showMessage(f"Exported {count} log entries to {path}", 5000)
+        except OSError as exc:
+            QMessageBox.warning(self, "Export failed", str(exc))
 
     # ----------------------------------------------------------------- send
     def _write_bytes(self, data: bytes, echo_name: str | None = None) -> bool:
@@ -937,18 +1184,22 @@ class MainWindow(QMainWindow):
             self._append_data("tx", data)
         return ok
 
+    def _sync_custom_suffix(self, *_args) -> None:
+        self.custom_suffix_edit.setVisible(
+            self.line_ending_combo.currentText() == utils.LINE_ENDING_CUSTOM)
+
     def send_current(self) -> None:
         text = self.send_input.text()
         fmt = self.send_fmt_combo.currentText()
         line_ending = self.line_ending_combo.currentText()
+        suffix = self.custom_suffix_edit.text()
         try:
-            payload = utils.parse_input(text, fmt)
+            payload = utils.build_payload(text, fmt, line_ending, suffix)
         except utils.ParseError as exc:
             QMessageBox.warning(self, "Invalid data", str(exc))
             return
-        payload += utils.LINE_ENDINGS.get(line_ending, b"")
         if self._write_bytes(payload):
-            self._record_history(text, fmt, line_ending)
+            self._record_history(text, fmt, line_ending, suffix)
             self._history_nav_index = -1
             self._history_nav_pending = ""
             if self.clear_after_send_check.isChecked():
@@ -972,21 +1223,24 @@ class MainWindow(QMainWindow):
         if row < 0 or row >= len(self.shortcuts):
             return
         sc = self.shortcuts[row]
+        line_ending = sc.get("line_ending", "None")
+        suffix = sc.get("custom_suffix", "")
         try:
-            payload = utils.parse_input(sc.get("data", ""), sc.get("fmt", "ASCII"))
+            payload = utils.build_payload(
+                sc.get("data", ""), sc.get("fmt", "ASCII"), line_ending, suffix)
         except utils.ParseError as exc:
             QMessageBox.warning(self, "Invalid shortcut", str(exc))
             return
-        line_ending = sc.get("line_ending", "None")
-        payload += utils.LINE_ENDINGS.get(line_ending, b"")
         if self._write_bytes(payload):
-            self._record_history(sc.get("data", ""), sc.get("fmt", "ASCII"), line_ending)
+            self._record_history(
+                sc.get("data", ""), sc.get("fmt", "ASCII"), line_ending, suffix)
 
     def add_shortcut(self) -> None:
         dlg = ShortcutDialog(self, {
             "data": self.send_input.text(),
             "fmt": self.send_fmt_combo.currentText(),
             "line_ending": self.line_ending_combo.currentText(),
+            "custom_suffix": self.custom_suffix_edit.text(),
         })
         if dlg.exec():
             self.shortcuts.append(dlg.result_dict())
@@ -1013,12 +1267,14 @@ class MainWindow(QMainWindow):
         self._rebuild_shortcuts()
 
     # ---------------------------------------------------------------- history
-    def _record_history(self, text: str, fmt: str, line_ending: str) -> None:
+    def _record_history(self, text: str, fmt: str, line_ending: str,
+                        custom_suffix: str = "") -> None:
         entry = {
             "ts": datetime.now().strftime("%H:%M:%S"),
             "text": text,
             "fmt": fmt,
             "line_ending": line_ending,
+            "custom_suffix": custom_suffix,
         }
         self.history.insert(0, entry)
         del self.history[MAX_HISTORY:]
@@ -1040,6 +1296,7 @@ class MainWindow(QMainWindow):
         self.send_input.setText(h.get("text", ""))
         self.send_fmt_combo.setCurrentText(utils.normalize_format(h.get("fmt", "ASCII")))
         self.line_ending_combo.setCurrentText(h.get("line_ending", "CRLF (\\r\\n)"))
+        self.custom_suffix_edit.setText(h.get("custom_suffix", ""))
         self.send_input.setFocus()
 
     def resend_history(self) -> None:
@@ -1049,11 +1306,12 @@ class MainWindow(QMainWindow):
         h = self.history[row]
         fmt = utils.normalize_format(h.get("fmt", "ASCII"))
         try:
-            payload = utils.parse_input(h.get("text", ""), fmt)
+            payload = utils.build_payload(
+                h.get("text", ""), fmt, h.get("line_ending", "None"),
+                h.get("custom_suffix", ""))
         except utils.ParseError as exc:
             QMessageBox.warning(self, "Invalid data", str(exc))
             return
-        payload += utils.LINE_ENDINGS.get(h.get("line_ending", "None"), b"")
         self._write_bytes(payload)
 
     def save_history_as_shortcut(self) -> None:
@@ -1065,6 +1323,7 @@ class MainWindow(QMainWindow):
             "data": h.get("text", ""),
             "fmt": utils.normalize_format(h.get("fmt", "ASCII")),
             "line_ending": h.get("line_ending", "CRLF (\\r\\n)"),
+            "custom_suffix": h.get("custom_suffix", ""),
         })
         if dlg.exec():
             self.shortcuts.append(dlg.result_dict())
@@ -1155,13 +1414,17 @@ class MainWindow(QMainWindow):
         if not any(s.enabled for s in self.steps):
             QMessageBox.information(self, "Empty sequence", "Add at least one enabled step.")
             return
+        loop = self.loop_controls.loop()
+        try:
+            loop.until_rx_bytes()
+        except utils.ParseError as exc:
+            QMessageBox.warning(self, "Invalid loop pattern", str(exc))
+            return
         self.stop_sequence()
         for r in range(self.seq_table.rowCount()):
             self.seq_table.item(r, 5).setText("")
         self.runner = SequenceRunner(
-            self.steps, self.worker.write, self.rx_monitor,
-            loop=self.loop_check.isChecked(),
-            loop_delay_ms=self.loop_delay.value(),
+            self.steps, self.worker.write, self.rx_monitor, loop=loop,
         )
         self.runner.step_started.connect(self._on_step_started)
         self.runner.step_result.connect(self._on_step_result)
@@ -1249,20 +1512,35 @@ class MainWindow(QMainWindow):
 
     # -------------------------------------------------------- sequence group
     def _rebuild_group_table(self) -> None:
+        self._building_group_table = True
         self.group_table.setRowCount(len(self.sequence_groups))
         for r, seq in enumerate(self.sequence_groups):
             enabled = sum(1 for s in seq.steps if s.enabled)
             total = len(seq.steps)
-            self.group_table.setItem(r, 0, QTableWidgetItem(seq.name))
-            self.group_table.setItem(r, 1, QTableWidgetItem(f"{enabled}/{total}"))
+            on = QTableWidgetItem()
+            on.setFlags(Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsEnabled)
+            on.setCheckState(Qt.CheckState.Checked if seq.enabled else Qt.CheckState.Unchecked)
+            on.setToolTip("Include this sequence when the whole group runs")
+            self.group_table.setItem(r, GROUP_COL_ON, on)
+            self.group_table.setItem(r, GROUP_COL_NAME, QTableWidgetItem(seq.name))
+            self.group_table.setItem(r, GROUP_COL_STEPS, QTableWidgetItem(f"{enabled}/{total}"))
             send_btn = QPushButton("Send")
             send_btn.clicked.connect(lambda _checked, row=r: self.send_group_sequence(row))
-            self.group_table.setCellWidget(r, 2, send_btn)
-            self.group_table.setItem(r, 3, QTableWidgetItem(""))
+            self.group_table.setCellWidget(r, GROUP_COL_SEND, send_btn)
+            self.group_table.setItem(r, GROUP_COL_STATUS, QTableWidgetItem(""))
+        self._building_group_table = False
+
+    def _on_group_item_changed(self, item: QTableWidgetItem) -> None:
+        if self._building_group_table or item.column() != GROUP_COL_ON:
+            return
+        row = item.row()
+        if 0 <= row < len(self.sequence_groups):
+            # Only the group membership changes; the sequence's steps are untouched.
+            self.sequence_groups[row].enabled = item.checkState() == Qt.CheckState.Checked
 
     def _set_group_table_enabled(self, enabled: bool) -> None:
         for r in range(self.group_table.rowCount()):
-            w = self.group_table.cellWidget(r, 2)
+            w = self.group_table.cellWidget(r, GROUP_COL_SEND)
             if w:
                 w.setEnabled(enabled)
 
@@ -1271,7 +1549,7 @@ class MainWindow(QMainWindow):
 
     def _clear_group_status(self) -> None:
         for r in range(self.group_table.rowCount()):
-            item = self.group_table.item(r, 3)
+            item = self.group_table.item(r, GROUP_COL_STATUS)
             if item:
                 item.setText("")
 
@@ -1346,12 +1624,18 @@ class MainWindow(QMainWindow):
         if not any(s.enabled for s in seq.steps):
             QMessageBox.information(self, "Empty sequence", f"\"{seq.name}\" has no enabled steps.")
             return
+        try:
+            seq.loop.until_rx_bytes()
+        except utils.ParseError as exc:
+            QMessageBox.warning(self, "Invalid loop pattern", str(exc))
+            return
         self.stop_sequence()
         self._clear_group_status()
-        if self.group_table.item(row, 3):
-            self.group_table.item(row, 3).setText("running…")
+        if self.group_table.item(row, GROUP_COL_STATUS):
+            self.group_table.item(row, GROUP_COL_STATUS).setText("running…")
         self.group_table.selectRow(row)
-        self.runner = SequenceRunner(seq.steps, self.worker.write, self.rx_monitor)
+        self.runner = SequenceRunner(seq.steps, self.worker.write, self.rx_monitor,
+                                     loop=seq.loop)
         self.runner.step_started.connect(
             lambda _idx, _name, r=row: self.group_table.selectRow(r))
         self.runner.step_result.connect(
@@ -1370,7 +1654,7 @@ class MainWindow(QMainWindow):
 
     def _set_group_row_status(self, row: int, status: str) -> None:
         if 0 <= row < self.group_table.rowCount():
-            item = self.group_table.item(row, 3)
+            item = self.group_table.item(row, GROUP_COL_STATUS)
             if item:
                 item.setText(status)
 
@@ -1389,8 +1673,10 @@ class MainWindow(QMainWindow):
         if not self.sequence_groups:
             QMessageBox.information(self, "Empty group", "Add at least one sequence.")
             return
-        if not any(any(s.enabled for s in seq.steps) for seq in self.sequence_groups):
-            QMessageBox.information(self, "Empty group", "No enabled steps in any sequence.")
+        if not any(any(s.enabled for s in seq.steps)
+                   for seq in self.sequence_groups if seq.enabled):
+            QMessageBox.information(
+                self, "Empty group", "No enabled steps in any enabled sequence.")
             return
         self.stop_sequence()
         self._clear_group_status()
@@ -1411,8 +1697,8 @@ class MainWindow(QMainWindow):
     def _on_group_seq_started(self, idx: int, _name: str) -> None:
         if 0 <= idx < self.group_table.rowCount():
             self.group_table.selectRow(idx)
-            if self.group_table.item(idx, 3):
-                self.group_table.item(idx, 3).setText("running…")
+            if self.group_table.item(idx, GROUP_COL_STATUS):
+                self.group_table.item(idx, GROUP_COL_STATUS).setText("running…")
 
     def _on_group_seq_finished(self, idx: int, _name: str, completed: bool) -> None:
         if 0 <= idx < self.group_table.rowCount():
@@ -1436,8 +1722,14 @@ class MainWindow(QMainWindow):
         self.status.showMessage(msg, 4000)
 
     # -------------------------------------------------------------- project
+    def _set_project_path(self, path: str | None) -> None:
+        """Record the active project file and reflect it in the window title."""
+        self._project_path = str(path) if path else None
+        self.setWindowTitle(window_title(self._project_path))
+
     def save_project(self) -> None:
-        default_name = (self.project_name_edit.text().strip() or "project") + ".msproj"
+        default_name = self._project_path or (
+            (self.project_name_edit.text().strip() or "project") + ".msproj")
         path, _ = QFileDialog.getSaveFileName(
             self, "Save project", default_name,
             "MegaSerial project (*.msproj);;JSON files (*.json);;All files (*)")
@@ -1449,9 +1741,11 @@ class MainWindow(QMainWindow):
             project_name=self.project_name_edit.text().strip(),
             settings=self._collect_settings(),
             events=list(self.events),
+            panel_view=self.panel_view.workspace.to_dict(),
         )
         try:
             project_io.save_project(path, data)
+            self._set_project_path(path)
             self.status.showMessage(f"Project saved to {path}", 5000)
         except OSError as exc:
             QMessageBox.warning(self, "Save failed", str(exc))
@@ -1462,17 +1756,35 @@ class MainWindow(QMainWindow):
             "MegaSerial project (*.msproj);;JSON files (*.json);;All files (*)")
         if not path:
             return
+        self.open_project(path)
+
+    def open_project(self, path: str) -> bool:
+        """Load a project file into the window.
+
+        Shared by File > Open and the command line, so both behave identically.
+        Returns True when the project was applied.
+        """
         try:
             loaded = project_io.load_project(path)
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             QMessageBox.warning(self, "Import failed", str(exc))
-            return
+            return False
 
         settings = loaded.get("settings", {})
         if not isinstance(settings, dict):
             QMessageBox.warning(self, "Import failed", "Project settings are invalid.")
-            return
+            return False
 
+        self._rx_flush_timer.stop()
+        self._rx_buf.clear()
+        self._rx_line_start = True
+        workspace = PanelWorkspace.restore(loaded.get("panel_view"))
+        if not isinstance(loaded.get("panel_view"), dict) or not loaded['panel_view'].get('received_counts'):
+            for ev in loaded.get('events', []):
+                workspace.record_received(ev)
+        self.panel_view.set_workspace(workspace)
+        self._protocol_decoder = ProtocolDecoder(self.panel_view.workspace.protocol_profile)
+        self.presentation_combo.setCurrentIndex(int(self.panel_view.workspace.active))
         self.cfg.update(settings)
         self.shortcuts = list(self.cfg.get("shortcuts", []))
         self.steps = [Step.from_dict(d) for d in self.cfg.get("sequence", [])]
@@ -1495,12 +1807,14 @@ class MainWindow(QMainWindow):
         if self.graph_view_check.isChecked():
             self._replay_graph()
 
+        self._set_project_path(path)
         self.status.showMessage(f"Imported project from {path}", 5000)
+        return True
 
     # ---------------------------------------------------------------- close
     def closeEvent(self, event) -> None:
         self.stop_sequence()
         if self.worker:
             self.worker.stop()
-        config.save(self._collect_settings())
+        config.save(self._collect_settings(), snapshot=self._config_snapshot)
         super().closeEvent(event)

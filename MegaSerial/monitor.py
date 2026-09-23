@@ -2,20 +2,50 @@
 data stream. Two of these are used side by side for the split view."""
 from __future__ import annotations
 
+import csv
 import html
 import re
 from datetime import datetime
+from pathlib import Path
 
+from PyQt6.QtCore import QEvent, Qt
 from PyQt6.QtGui import QFont, QTextOption
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QPlainTextEdit,
 )
 
 from . import utils
+from .panel_protocol import panel_event
+from .panel_model import GENERAL
+from .ansi_text import ansi_html
 
 DISPLAY_FORMATS = ["ASCII", "HEX", "Binary", "Hexdump"]
 BYTES_PER_ROW = ["8", "16", "32", "64"]
 _ROW_FORMATS = {"HEX", "Binary", "Hexdump"}
+
+# Presentation only. Events keep the semantic "rx"/"tx" direction values that
+# filtering, CSV export and project files rely on.
+# Request text glyphs so the foreground color applies instead of emoji artwork.
+DIRECTION_SYMBOLS = {"rx": "⬅\ufe0e", "tx": "➡\ufe0e"}
+DIRECTION_COLORS = {"rx": "#dc2626", "tx": "#16a34a"}
+
+
+def direction_symbol(direction: str) -> str:
+    """Arrow shown for an event direction; anything but ``tx`` reads as incoming."""
+    return DIRECTION_SYMBOLS.get(direction, DIRECTION_SYMBOLS["rx"])
+
+MIN_FONT_POINT_SIZE = 6
+MAX_FONT_POINT_SIZE = 32
+DEFAULT_FONT_POINT_SIZE = 11
+
+
+def clamp_font_point_size(size) -> int:
+    """Coerce *size* to an int inside the supported monitor font range."""
+    try:
+        value = int(size)
+    except (TypeError, ValueError):
+        return DEFAULT_FONT_POINT_SIZE
+    return max(MIN_FONT_POINT_SIZE, min(MAX_FONT_POINT_SIZE, value))
 
 
 def event_text(ev: dict) -> str:
@@ -55,6 +85,88 @@ def event_matches_filter(ev: dict, regex: re.Pattern | None,
     return bool(regex.search(event_text(ev)))
 
 
+# ---------------------------------------------------------------------------
+# CSV export
+# ---------------------------------------------------------------------------
+
+CSV_COLUMNS = [
+    "index", "timestamp", "elapsed_ms", "event_type", "direction",
+    "data_format", "data", "text", "log_kind", "message",
+]
+CSV_TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S.%f"
+# Excel only auto-detects UTF-8 in a CSV when a BOM is present.
+CSV_ENCODING = "utf-8-sig"
+
+
+def _csv_text(ev: dict) -> str:
+    """One-line rendering of the text the monitor filter matches against."""
+    text = event_text(ev)
+    return text.replace("\\", "\\\\").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
+
+
+def _csv_timestamp(ev: dict) -> str:
+    ts = ev.get("ts")
+    if not isinstance(ts, datetime):
+        return ""
+    return ts.strftime(CSV_TIMESTAMP_FORMAT)[:-3]
+
+
+def event_csv_row(ev: dict, index: int, prev_ts: datetime | None) -> list:
+    """Build one CSV row from a stored monitor event.
+
+    Fields an event does not carry are left empty rather than invented.
+    """
+    ts = ev.get("ts")
+    elapsed = ""
+    if isinstance(ts, datetime) and isinstance(prev_ts, datetime):
+        elapsed = int((ts - prev_ts).total_seconds() * 1000)
+
+    row = {
+        "index": index,
+        "timestamp": _csv_timestamp(ev),
+        "elapsed_ms": elapsed,
+        "event_type": ev.get("type", ""),
+        "text": _csv_text(ev),
+    }
+    if ev.get("type") == "data":
+        row.update({
+            "direction": ev.get("dir", ""),
+            "data_format": "hex",
+            "data": utils.to_hex(ev.get("data", b"") or b""),
+        })
+    elif ev.get("type") == "log":
+        row.update({
+            "log_kind": ev.get("kind", "info"),
+            "message": ev.get("msg", ""),
+        })
+    return [row.get(column, "") for column in CSV_COLUMNS]
+
+
+def events_to_csv_rows(events, panel_titles: dict | None = None) -> list[list]:
+    """Return the header row followed by one row per event."""
+    rows = [list(CSV_COLUMNS) + (["panel_id", "panel_title", "device_channel", "protocol", "protocol_diagnostic"] if panel_titles is not None else [])]
+    prev_ts = None
+    for index, ev in enumerate(events, start=1):
+        row = event_csv_row(ev, index, prev_ts)
+        if panel_titles is not None:
+            ident = ev.get("panel_id") or GENERAL
+            row[CSV_COLUMNS.index("text")] = _csv_text(panel_event(ev))
+            row.extend([ident, panel_titles.get(ident, "General" if ident == GENERAL else ""),
+                        ev.get("device_channel", ""), ev.get("protocol", ""), ev.get("protocol_diagnostic", "")])
+        rows.append(row)
+        if isinstance(ev.get("ts"), datetime):
+            prev_ts = ev["ts"]
+    return rows
+
+
+def write_events_csv(path: str | Path, events, panel_titles: dict | None = None) -> int:
+    """Write *events* as CSV and return the number of exported events."""
+    rows = events_to_csv_rows(events, panel_titles)
+    with open(path, "w", encoding=CSV_ENCODING, newline="") as fh:
+        csv.writer(fh).writerows(rows)
+    return len(rows) - 1
+
+
 def render_html(ev: dict, fmt: str, bytes_per_row: int, opts: dict,
                 prev_ts: datetime | None = None, line_num: int = 0) -> str:
     """Build one HTML block for an event, given a view's format/row settings."""
@@ -79,22 +191,30 @@ def render_html(ev: dict, fmt: str, bytes_per_row: int, opts: dict,
     direction = ev["dir"]
     color = colors["tx"] if direction == "tx" else colors["rx"]
     if opts.get("show_dir"):
-        arrow = "→" if direction == "tx" else "←"
-        prefix += f'<span style="color:{color}">{arrow} </span>'
-    body = utils.format_output(ev["data"], fmt, bytes_per_row)
+        arrow_direction = "tx" if direction == "tx" else "rx"
+        arrow_color = opts.get("direction_colors", {}).get(arrow_direction, DIRECTION_COLORS[arrow_direction])
+        prefix += f'<span style="color:{arrow_color}">{direction_symbol(direction)} </span>'
+    body = (ev["data"].decode("utf-8", errors="replace")
+            if fmt == "ASCII" and opts.get("unicode_text")
+            else utils.format_output(ev["data"], fmt, bytes_per_row))
     if fmt == "ASCII":
         # Drop carriage returns and the trailing newline so line-oriented text
         # (e.g. AT commands) shows as one clean line per entry.
         body = body.replace("\r", "").rstrip("\n")
-    body_html = html.escape(body).replace("\n", "<br>")
+    body_html = (ansi_html(ev["_panel_ansi_text"].replace("\r", "").rstrip("\n"))
+                 if opts.get("unicode_text") and "_panel_ansi_text" in ev
+                 else html.escape(body).replace("\n", "<br>"))
     return f'{prefix}<span style="color:{color}">{body_html}</span>'
 
 
 class MonitorView(QWidget):
     def __init__(self, fmt: str = "ASCII", bytes_per_row: int = 16,
-                 on_settings_changed=None, max_blocks: int = 6000):
+                 on_settings_changed=None, max_blocks: int = 6000,
+                 font_point_size: int = DEFAULT_FONT_POINT_SIZE,
+                 on_zoom_requested=None):
         super().__init__()
         self._on_change = on_settings_changed
+        self._on_zoom = on_zoom_requested
         self._line_counter = 0
 
         v = QVBoxLayout(self)
@@ -125,11 +245,42 @@ class MonitorView(QWidget):
         self.edit.setWordWrapMode(QTextOption.WrapMode.WrapAnywhere)
         mono = QFont("Monospace")
         mono.setStyleHint(QFont.StyleHint.TypeWriter)
-        mono.setPointSize(11)
+        mono.setPointSize(clamp_font_point_size(font_point_size))
         self.edit.setFont(mono)
+        self.edit.viewport().installEventFilter(self)
         v.addWidget(self.edit, 1)
 
         self._sync_row_enabled()
+
+    # -- zoom --------------------------------------------------------------
+    @property
+    def font_point_size(self) -> int:
+        return clamp_font_point_size(self.edit.font().pointSize())
+
+    def set_font_point_size(self, size) -> int:
+        """Apply a clamped presentation font size and return what was applied."""
+        applied = clamp_font_point_size(size)
+        font = self.edit.font()
+        font.setPointSize(applied)
+        self.edit.setFont(font)
+        return applied
+
+    def zoom_by(self, steps: int) -> None:
+        """Handle a zoom gesture, delegating to the owner when one is set."""
+        if self._on_zoom is not None:
+            self._on_zoom(steps)
+        else:
+            self.set_font_point_size(self.font_point_size + steps)
+
+    def eventFilter(self, obj, event):
+        # Ctrl+wheel zooms; a plain wheel falls through to normal scrolling.
+        if obj is self.edit.viewport() and event.type() == QEvent.Type.Wheel:
+            if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                delta = event.angleDelta().y()
+                if delta:
+                    self.zoom_by(1 if delta > 0 else -1)
+                return True
+        return super().eventFilter(obj, event)
 
     # -- settings ----------------------------------------------------------
     def _sync_row_enabled(self) -> None:
@@ -154,14 +305,23 @@ class MonitorView(QWidget):
             return 16
 
     # -- rendering ---------------------------------------------------------
+    def scroll_state(self):
+        scrollbar = self.edit.verticalScrollBar()
+        return scrollbar.value(), scrollbar.value() >= scrollbar.maximum()
+
+    def restore_scroll(self, state, opts):
+        value, at_bottom = state
+        scrollbar = self.edit.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum() if at_bottom and opts.get("autoscroll") else value)
+
     def append_event(self, ev: dict, opts: dict, prev_ts: datetime | None = None) -> None:
+        state = self.scroll_state()
         self._line_counter += 1
         self.edit.appendHtml(render_html(ev, self.fmt, self.bytes_per_row, opts, prev_ts, self._line_counter))
-        if opts.get("autoscroll"):
-            sb = self.edit.verticalScrollBar()
-            sb.setValue(sb.maximum())
+        self.restore_scroll(state, opts)
 
     def rerender(self, events, opts: dict) -> None:
+        state = self.scroll_state()
         self.edit.clear()
         self._line_counter = 0
         fmt = self.fmt
@@ -172,9 +332,7 @@ class MonitorView(QWidget):
             self.edit.appendHtml(render_html(ev, fmt, bpr, opts, prev_ts, self._line_counter))
             if "ts" in ev:
                 prev_ts = ev["ts"]
-        if opts.get("autoscroll"):
-            sb = self.edit.verticalScrollBar()
-            sb.setValue(sb.maximum())
+        self.restore_scroll(state, opts)
 
     def clear(self) -> None:
         self.edit.clear()
